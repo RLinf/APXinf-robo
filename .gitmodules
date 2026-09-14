@@ -1,4 +1,3 @@
 [submodule "apxinf"]
 	path = apxinf
 	url = https://github.com/infinigence/ApxInf.git
-	branch = main
