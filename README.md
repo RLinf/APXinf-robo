@@ -541,6 +541,11 @@ Built with Rust 1.95 and 1.96; no minimum supported version is declared.
   [Build APXinf-robo](#build-apxinf-robo).
 - The pin is a SHA, never a branch. Bumping it is a reviewed change and must
   keep `tests/test_parity.py` green.
+- Use `git submodule update --init --recursive` to restore the recorded SHA.
+  `git submodule update --remote` instead selects a remote branch tip; with no
+  `branch` setting in `.gitmodules`, it defaults to the remote's HEAD. Removing
+  that setting does not prevent updates or enforce the pin. Reserve `--remote`
+  for deliberate engine upgrades, and review the resulting gitlink change.
 - To co-develop against an unpushed engine change, point the submodule at a
   local checkout for the duration and put it back before committing:
 

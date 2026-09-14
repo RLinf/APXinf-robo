@@ -1,15 +1,15 @@
 """Keep the repository root off ``sys.path`` during collection.
 
 The engine submodule is checked out at ``apxinf/``, which is also the name of the
-package it installs. Anything that puts this directory on ``sys.path`` -- ``python
--m pytest``, a REPL started here, ``python -c`` -- therefore resolves ``import
-apxinf`` to the submodule *directory* as an empty implicit namespace package
-instead of to the installed engine. The failure surfaces later and elsewhere, as
+package it installs. With the repository root on ``sys.path``, that directory
+can resolve as an empty namespace when the engine is missing or interfere with
+some editable-install finders. Ordinary installed packages take precedence over
+namespace directories. The failure can surface later and elsewhere as
 ``cannot import name 'Pi05Policy' from 'apxinf' (unknown location)``, which reads
 like a version mismatch rather than a shadowed name.
 
-Bare ``pytest`` never had the problem (rootdir is not prepended), so this only
-makes the two invocations agree. Dropping the entry is safe: nothing in this
+This makes collection independent of whether the invocation adds the repository
+root to the import path. Dropping the entry is safe: nothing in this
 repository is imported from the root -- the package lives under ``src/`` and the
 tests import it by name.
 """
