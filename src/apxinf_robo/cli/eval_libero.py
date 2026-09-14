@@ -56,8 +56,11 @@ from ..envs.libero import libero_images, libero_state, make_env
 LIBERO_ACTION_DIM = 7
 
 #: The preset whose wire contract this evaluator drives. The keys themselves are
-#: *not* restated here: they are read from the table below, so the evaluator and
-#: the server cannot drift into two different dialects of "LIBERO".
+#: *not* restated here: they are read from the table below, so the in-process
+#: backend cannot drift from what ``--robot franka_libero`` serves. For the
+#: websocket backend the table is only half the answer — the server resolved its
+#: own contract — so ``_assert_server_speaks_the_same_dialect`` compares the two
+#: at connect.
 LIBERO_PRESET = "franka_libero"
 MAX_STEPS = 520
 WAIT_STEPS = 10
@@ -80,9 +83,11 @@ def libero_convention():
     """LIBERO's wire dialect, read from the preset table rather than restated.
 
     Both backends send the same observation, so both resolve it here: the keys
-    the evaluator writes are by construction the keys ``--robot franka_libero``
-    serves. This costs no CUDA (the engine binding is loaded lazily by the
-    policy loader), so the websocket backend pays nothing for it.
+    the evaluator writes are the keys ``--robot franka_libero`` is defined by.
+    Whether a *remote* server was started under that preset is a separate
+    question, answered at connect. This costs no CUDA (the engine binding is
+    loaded lazily by the policy loader), so the websocket backend pays nothing
+    for it.
     """
     from ..presets import get_robot_preset
 
@@ -274,6 +279,38 @@ def _observation(base, wrist, state, prompt) -> dict:
     }
 
 
+def _assert_server_speaks_the_same_dialect(metadata) -> None:
+    """Fail at connect if the server's wire keys are not the ones we will send.
+
+    ``_observation`` builds its keys from the preset table, and the server
+    publishes the contract it actually resolved. A mismatch -- a server started
+    under a different ``--robot``, or with ``--image-keys`` overrides -- is
+    otherwise silent: the observation is accepted, the missing keys read as
+    absent inputs, and the run reports a low success rate that looks like an
+    accuracy regression. Metadata the server does not publish is not asserted.
+    """
+    convention = libero_convention()
+    expected = {
+        "image_keys": list(convention.image_keys),
+        "state_key": convention.state_key,
+        "prompt_key": convention.prompt_key,
+    }
+    mismatches = []
+    for field, want in expected.items():
+        if field not in metadata:
+            continue
+        got = metadata[field]
+        if isinstance(want, list):
+            got = list(got) if isinstance(got, (list, tuple)) else got
+        if got != want:
+            mismatches.append(f"{field}: server {got!r}, evaluator {want!r}")
+    if mismatches:
+        raise RuntimeError(
+            "server speaks a different LIBERO dialect than "
+            f"--robot {LIBERO_PRESET} -- " + "; ".join(mismatches)
+        )
+
+
 class WebsocketBackend:
     """Reach an OpenPI-compatible server through the unmodified ``openpi_client``."""
 
@@ -296,6 +333,11 @@ class WebsocketBackend:
             raise RuntimeError(
                 f"server precision is {actual_precision!r}, expected {expected_precision!r}"
             )
+        try:
+            _assert_server_speaks_the_same_dialect(self.metadata)
+        except RuntimeError:
+            self.close()
+            raise
 
     def infer(
         self, base, wrist, state, prompt, noise=None
