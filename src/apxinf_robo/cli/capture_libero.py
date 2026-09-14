@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """``apxinf-robo capture-libero`` -- write LIBERO observations for FP8 calibration.
 
-ApxInf's ``scripts/calibrate_pi05.py`` builds a checkpoint-bound FP8 profile from
+``scripts/calibrate_pi05.py`` builds a checkpoint-bound FP8 profile from
 representative observations. It can drive LIBERO itself (``--libero-suite``), but
 only under the engine's own wire keys: MuJoCo it can run, a robot preset it
 cannot know.
@@ -12,7 +12,7 @@ of a named robot preset -- the dialect the policy will later be served with, and
 therefore the dialect the calibrator has to be told:
 
     apxinf-robo capture-libero --suite libero_10 --output-dir /tmp/libero-calib
-    python apxinf/scripts/calibrate_pi05.py --model-dir /ckpt/pi05_libero \
+    python scripts/calibrate_pi05.py --model-dir /ckpt/pi05_libero \
         --image-key observation/image --image-key observation/wrist_image \
         --input-dir /tmp/libero-calib --output /ckpt/pi05_libero/calibration.json
 
@@ -59,8 +59,11 @@ WAIT_STEPS = 10
 #: Open gripper, no motion -- the same dummy used while eval-libero settles.
 NEUTRAL_ACTION = [0.0] * 6 + [-1.0]
 
-#: Where the engine's calibrator lives relative to a checkout of this repository.
-CALIBRATE_SCRIPT = "apxinf/scripts/calibrate_pi05.py"
+#: Where the calibrator lives relative to a checkout of this repository. It is
+#: the vendored copy under ``scripts/``, not the one inside the submodule, so
+#: this line and README.md name the same file and a submodule bump cannot move
+#: it out from under the printed command.
+CALIBRATE_SCRIPT = "scripts/calibrate_pi05.py"
 
 
 def _progress(message: str) -> None:

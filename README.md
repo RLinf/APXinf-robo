@@ -351,9 +351,23 @@ python3 scripts/calibrate_pi05.py \
   --libero-suite libero_10
 ```
 
+That drives MuJoCo inside the calibrator, under the *engine's* default wire keys.
+To calibrate for the dialect a robot preset actually serves — or to keep MuJoCo
+out of the machine that holds the checkpoint — capture the frames first and hand
+the calibrator the directory:
+
+```bash
+apxinf-robo capture-libero --suite libero_10 --output-dir /tmp/libero-calib
+```
+
+`capture-libero` prints the matching `calibrate_pi05.py --input-dir` line filled
+in with `--robot`'s keys; run that rather than transcribing them. The captured
+NPZ files are a reviewable, re-runnable artifact, which the in-process path is
+not.
+
 See [PI0.5 FP8 calibration](https://github.com/infinigence/ApxInf/blob/main/doc/pi05-fp8-calibration.md) for
-the Observation format, native LIBERO sampling, and output options. The native
-path uses the same LIBERO/MuJoCo dependencies as
+the Observation format, native LIBERO sampling, and output options. Both native
+paths use the same LIBERO/MuJoCo dependencies as
 [LIBERO evaluation](#libero-evaluation).
 
 ### INT8
