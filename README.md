@@ -127,11 +127,14 @@ Then invoke it with the model, the target, and the acceptance bar:
 ApxInf, Jetson Thor, BF16, parity against the reference within 1e-2
 ```
 
-It works from the same guides a human would follow:
-- [porting workflow](apxinf/doc/porting-workflow.md),
-- [adding a new model](apxinf/doc/adding-a-new-model.md),
-- [model-layer architecture](apxinf/doc/model-layer-architecture.md),
-- [adding new kernels](apxinf/doc/adding-new-kernels.md).
+It works from the same guides a human would follow. These live in the engine, so
+they are linked upstream rather than by path: GitHub does not serve a
+submodule's files under this repository's tree, though a recursive clone has
+them all under `apxinf/doc/`.
+- [porting workflow](https://github.com/infinigence/ApxInf/blob/main/doc/porting-workflow.md),
+- [adding a new model](https://github.com/infinigence/ApxInf/blob/main/doc/adding-a-new-model.md),
+- [model-layer architecture](https://github.com/infinigence/ApxInf/blob/main/doc/model-layer-architecture.md),
+- [adding new kernels](https://github.com/infinigence/ApxInf/blob/main/doc/adding-new-kernels.md).
 
 ## Build APXinf-robo
 
@@ -348,7 +351,7 @@ python3 scripts/calibrate_pi05.py \
   --libero-suite libero_10
 ```
 
-See [PI0.5 FP8 calibration](apxinf/doc/pi05-fp8-calibration.md) for
+See [PI0.5 FP8 calibration](https://github.com/infinigence/ApxInf/blob/main/doc/pi05-fp8-calibration.md) for
 the Observation format, native LIBERO sampling, and output options. The native
 path uses the same LIBERO/MuJoCo dependencies as
 [LIBERO evaluation](#libero-evaluation).
@@ -474,7 +477,7 @@ Any registered model type works: `AutoPolicy` dispatches on the checkpoint's
 `config.json`, so the same command benchmarks the next model without a flag
 change.
 
-For one-step evaluation, please refer to `apxinf/doc/run_warmstart_with_onestep.md`
+For one-step evaluation, please refer to [run warmstart with onestep](https://github.com/infinigence/ApxInf/blob/main/doc/run_warmstart_with_onestep.md)
 
 
 ## NVIDIA build environment

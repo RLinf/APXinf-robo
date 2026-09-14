@@ -58,7 +58,7 @@ path on byte-identical inputs, which is what `--no-tactics` in
 `bare_model_infer.py` reproduces by hand.
 
 The engine has its own examples for the layer below —
-[`apxinf/python/apxinf/examples/`](../apxinf/python/apxinf/examples)
+[`python/apxinf/examples/`](https://github.com/infinigence/ApxInf/tree/main/python/apxinf/examples)
 covers `AutoPolicy`, `Pi05Policy`, and the raw websocket server, none of which
 know what a robot is. Reach for those when the question is about a *checkpoint*;
 reach for these when it is about a *robot*.
