@@ -57,24 +57,53 @@ _INSTALL_HINT = (
 )
 
 
+def _shadowing_checkout_root():
+    """The submodule directory shadowing ``apxinf``, if that is what happened."""
+    import sys
+
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    submodule = repo_root / "apxinf"
+    if not submodule.is_dir():
+        return None
+    for entry in sys.path:
+        try:
+            resolved = pathlib.Path(entry or ".").resolve()
+        except OSError:  # pragma: no cover - unreadable sys.path entry
+            continue
+        if resolved == repo_root:
+            return submodule
+    return None
+
+
 def require_apxinf():
     """Import and return the ``apxinf`` package, with an actionable error.
 
     A bare ``ModuleNotFoundError: apxinf`` reads like a typo. It is almost always
     an uninitialized submodule, so say that instead.
 
-    The submodule directory is itself named ``apxinf``, so running from the
-    repository root puts it on ``sys.path`` and an uninstalled engine imports as
-    an empty implicit namespace package instead of raising -- the failure would
-    resurface later as a missing *submodule* of it, which reads like a version
-    mismatch rather than a missing install. A real package has a ``__file__``;
-    a namespace package does not.
+    The submodule directory is itself named ``apxinf``, so anything that puts the
+    repository root on ``sys.path`` -- ``python -c``, ``python -m``, a REPL
+    started there -- resolves the import to that *directory* as an empty implicit
+    namespace package instead of to the installed engine. A real package has a
+    ``__file__``; a namespace package does not, which is what separates "not
+    installed" from "shadowed by the checkout". Left undetected the failure
+    resurfaces later as a missing *submodule* of ``apxinf``, which reads like a
+    version mismatch.
     """
     try:
         import apxinf
     except ImportError as exc:  # pragma: no cover - environment-dependent
         raise ImportError(_INSTALL_HINT) from exc
     if getattr(apxinf, "__file__", None) is None:  # pragma: no cover
+        shadow = _shadowing_checkout_root()
+        if shadow is not None:
+            raise ImportError(
+                f"`import apxinf` resolved to the submodule directory {shadow} "
+                "instead of the installed engine, because the repository root is "
+                "on sys.path. Run this from any other directory -- `pytest` and "
+                "the `apxinf-robo` console script are unaffected -- or drop the "
+                "root from sys.path the way conftest.py does."
+            )
         raise ImportError(_INSTALL_HINT)
     return apxinf
 
