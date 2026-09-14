@@ -1,81 +1,38 @@
-"""Translate native LIBERO simulator observations into ApxInf Observations."""
+"""Native LIBERO observation conversion, re-exported for the vendored scripts.
+
+The conversions themselves live in :mod:`apxinf_robo.envs.libero` and are *not*
+restated here. Evaluation (``apxinf-robo eval-libero``), capture
+(``apxinf-robo capture-libero``), and calibration (``scripts/calibrate_pi05.py``)
+must agree on camera orientation and robot-state layout down to the byte: a
+divergence there changes success rates and FP8 scales with no error anywhere, and
+the goldens in ``tests/test_libero_observation.py`` only pin the package copy.
+
+This module exists because the engine's ``scripts/pi05_calibration_data.py`` --
+which this repository vendors -- imports it by that name. It is a shim, not a
+mirror.
+"""
 
 from __future__ import annotations
 
-import math
-import pathlib
-
-import numpy as np
-
-
-def quat_to_axis_angle(quat: np.ndarray) -> np.ndarray:
-    quat = np.asarray(quat, dtype=np.float64).copy()
-    quat[3] = np.clip(quat[3], -1.0, 1.0)
-    denominator = math.sqrt(max(0.0, 1.0 - quat[3] * quat[3]))
-    if math.isclose(denominator, 0.0):
-        return np.zeros(3, dtype=np.float32)
-    return (quat[:3] * 2.0 * math.acos(quat[3]) / denominator).astype(np.float32)
-
-
-def libero_images(base: np.ndarray, wrist: np.ndarray) -> np.ndarray:
-    """Orient raw LIBERO frames; the selected policy owns model-specific resize."""
-    return np.stack(
-        [np.ascontiguousarray(base[::-1, ::-1]), np.ascontiguousarray(wrist[::-1, ::-1])]
+try:
+    from apxinf_robo.envs.libero import (  # noqa: F401
+        libero_images,
+        libero_state,
+        make_env,
+        quat_to_axis_angle,
+        to_apxinf_observation,
     )
+except ImportError as error:  # pragma: no cover - environment-dependent
+    raise ImportError(
+        "the vendored calibration scripts read LIBERO observations through "
+        "apxinf_robo; install this package first (`pip install -e .`), as "
+        "described in README.md"
+    ) from error
 
-
-def libero_state(observation) -> np.ndarray:
-    """Convert LIBERO's two mirrored finger joints to one gripper coordinate."""
-    gripper = np.asarray(observation["robot0_gripper_qpos"]).reshape(-1)
-    if gripper.size != 2:
-        raise ValueError(f"robot0_gripper_qpos must have 2 values, got {gripper.size}")
-    return np.concatenate(
-        (
-            observation["robot0_eef_pos"],
-            quat_to_axis_angle(observation["robot0_eef_quat"]),
-            gripper[:1],
-        )
-    ).astype(np.float32, copy=False)
-
-
-def make_env(task, seed: int):
-    """Build the same off-screen LIBERO environment used by evaluation."""
-    try:
-        from libero.libero import get_libero_path
-        from libero.libero.envs import OffScreenRenderEnv
-    except ImportError as error:
-        raise ImportError(
-            "native LIBERO observations require the LIBERO and MuJoCo evaluation "
-            "dependencies; install LIBERO as described in README.md"
-        ) from error
-
-    bddl = pathlib.Path(get_libero_path("bddl_files")) / task.problem_folder / task.bddl_file
-    env = OffScreenRenderEnv(
-        bddl_file_name=str(bddl),
-        camera_heights=256,
-        camera_widths=256,
-    )
-    env.seed(seed)
-    return env
-
-
-def to_apxinf_observation(
-    observation,
-    *,
-    prompt: str,
-    image_keys: tuple[str, str],
-    prompt_key: str,
-    state_key: str,
-) -> dict:
-    """Convert one raw simulator frame using the evaluation-time convention."""
-    images = libero_images(
-        observation["agentview_image"],
-        observation["robot0_eye_in_hand_image"],
-    )
-    state = libero_state(observation)
-    return {
-        image_keys[0]: images[0],
-        image_keys[1]: images[1],
-        state_key: state,
-        prompt_key: prompt,
-    }
+__all__ = [
+    "quat_to_axis_angle",
+    "libero_images",
+    "libero_state",
+    "make_env",
+    "to_apxinf_observation",
+]
