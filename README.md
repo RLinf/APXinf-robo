@@ -472,7 +472,7 @@ regression can be attributed to the engine, the processors, or the transport.
 python scripts/bench_pi05.py --model-dir <path-to-model> --precision bf16 --layer l1,l2
 ```
 
-- `--layer` selects any subset of `l1` (bare model), `l2` (full policy), `l3`
+- `--layer` selects any subset of `l1` (bare model), `l2` (engine policy), `l3`
   (websocket round trip). L3 attaches to a running server and needs no local
   weights.
 - `--model-dir` runs a real checkpoint at its native horizon; `--random-weights`
@@ -490,6 +490,13 @@ python scripts/bench_pi05.py --model-dir <path-to-model> --precision bf16 --laye
 Any registered model type works: `AutoPolicy` dispatches on the checkpoint's
 `config.json`, so the same command benchmarks the next model without a flag
 change.
+
+`l2` is the engine policy, not `build_robot_policy`, so a preset's own pre/post
+steps are outside the measurement. `franka_libero` adds none — it only supplies
+constructor arguments — but `unitree_g1` wires real arithmetic (state
+discretization into the prompt, 32→16 action encode) that `l2` does not time.
+Benchmark that through `l3` against a server started under the preset, or through
+`eval-libero`'s per-segment latency, until this script grows a `--robot` path.
 
 For one-step evaluation, please refer to [run warmstart with onestep](https://github.com/infinigence/ApxInf/blob/main/doc/run_warmstart_with_onestep.md)
 

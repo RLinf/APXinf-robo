@@ -44,6 +44,16 @@ server (``--host/--port``) and needs no local weights — serve with
     # L3 against a running websocket server
     python scripts/bench_pi05.py --layer l3 --precision bf16 \
         --host 127.0.0.1 --port 8000 --prompt "put both moka pots on the stove"
+
+**What L2 is not.** This script is vendored from the engine and its L2 is still
+the engine's policy (``AutoPolicy`` / ``Pi05Policy``), not
+``apxinf_robo.build_robot_policy``. A preset's own pre/post steps therefore sit
+outside the measurement: for ``franka_libero`` that costs nothing, because the
+preset only supplies constructor arguments, but for a preset with wired robot
+steps (``unitree_g1``: state discretization into the prompt, 32→16 action
+encode) the served latency is higher than L2 reports here. Benchmarking a robot
+policy is a ``--robot`` path this script does not have yet. L3 does not have the
+gap -- it measures whatever the server was started with.
 """
 
 from __future__ import annotations
