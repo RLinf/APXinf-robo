@@ -7,7 +7,7 @@ repository root makes collection independent of the pytest invocation.
 import pathlib
 import sys
 
-_ROOT = str(pathlib.Path(__file__).resolve().parent)
+_ROOT = str(pathlib.Path(__file__).resolve().parents[1])
 
 for _entry in ("", ".", _ROOT):
     while _entry in sys.path:

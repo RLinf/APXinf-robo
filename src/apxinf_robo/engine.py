@@ -52,7 +52,7 @@ _INSTALL_HINT = (
     "pip dependency, because it is a Rust/PyO3/CUDA build that has to be "
     "compiled for the target machine:\n"
     "    git submodule update --init --recursive\n"
-    "    pip install -e apxinf/python/apxinf\n"
+    "    pip install ./apxinf/python/apxinf\n"
     "and build the apxinf_py extension with maturin for anything that runs a model."
 )
 
@@ -96,7 +96,7 @@ def require_apxinf():
                 "If the engine is already installed editable in this Python "
                 "environment, the checkout may be interfering with its import. "
                 "Try running from another directory or removing the repository "
-                "root from sys.path as conftest.py does."
+                "root from sys.path as tests/conftest.py does."
             )
         raise ImportError(_INSTALL_HINT)
     return apxinf

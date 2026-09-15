@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The engine itself is a submodule, installed editable from apxinf/.
+# The engine itself is installed separately from the apxinf/ submodule.
 # It is deliberately NOT a pip dependency: it is a Rust/PyO3/CUDA build that has
 # to be compiled for the target machine.
 #

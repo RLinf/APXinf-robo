@@ -144,13 +144,14 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install maturin
 CARGO_TARGET_DIR=target/wheel maturin build --release --features cuda --auditwheel skip -m apxinf/crates/apxinf-py/Cargo.toml
 pip install --force-reinstall target/wheel/wheels/apxinf_py-*.whl
-pip install -e "apxinf/python/apxinf[serving]"
+pip install "./apxinf/python/apxinf[serving]"
 pip install -e ".[libero,serve]"
 ```
 
 Install on Linux with an NVIDIA driver, CUDA toolkit, Rust, and `cmake`.
 Use `--features cuda` when building the binding. The `serving` extra installs
-msgpack and websockets; omit it for in-process use.
+msgpack and websockets; omit it for in-process use. Reinstall the engine Python
+package after changing its source or updating the submodule.
 
 The build queries the visible GPU for its compute capability and compiles the
 kernels for exactly that architecture, so build on the machine you deploy to;
@@ -534,7 +535,7 @@ git submodule status apxinf
 If the output starts with `+`, the engine is checked out at a different commit
 from the one recorded by this Robo checkout.
 Use `git submodule update --remote` only for a deliberate engine upgrade; it
-follows the remote default branch when no branch is configured. Before submitting
+follows `main`, as configured in `.gitmodules`. Before submitting
 an upgrade, review the gitlink diff and run `tests/test_parity.py` with
 `APXINF_PARITY_CHECKPOINT` set to a compatible checkpoint.
 
