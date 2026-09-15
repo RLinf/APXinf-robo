@@ -102,7 +102,7 @@ is 92.4%.
 | Hardware | Precision | Trials | Success | Rate |
 |---|---|---:|---:|---:|
 | Jetson AGX Thor | BF16 | 500 | 464 | 92.8% |
-| Jetson AGX Thor | FP8 | 500 | 470 | 94.0% |
+| Jetson AGX Thor | FP8 | 500 | 461 | 92.2% |
 | Jetson AGX Orin | BF16 | 500 | 460 | 92.0% |
 
 
