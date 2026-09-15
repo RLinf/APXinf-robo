@@ -1,59 +1,26 @@
 #!/usr/bin/env python3
-"""Unified layered latency benchmark for the pi05 serving stack — L0 / L1 / L2 / L3.
+"""Measure PI0.5 latency. Run from the APXinf-robo repository root.
 
-One entry point, driven by ``--layer × --precision × weights-source × input``,
-that folds the former ``bench_pi05_layers.py`` (L0/L1/L2 in-process) and
-``bench_pi05_openpi_latency.py`` (L3 websocket). The serving call peels into four
-concentric shells, each the cost of the layer around the one inside it:
+Layers:
+  l0  Model forward from patch embeddings.
+  l1  Model inference from resized RGB, including the Python/Rust call.
+  l2  Engine policy with preprocessing and postprocessing.
+  l3  Client/server round trip, including the served policy and transport.
 
-* **L0 model** — ``Model._infer_patches``: pure engine forward, inputs already
-  patch-embedded (vision→patches skipped). The floor.
-* **L1 rust** — ``Model.infer_rgb``: the ``apxinf_py`` binding from resized RGB;
-  adds Rust-side vision→patches (in the CUDA graph) + PyO3 marshalling over L0.
-* **L2 python api** — ``Pi05Policy.infer``: adds the numpy pre chain
-  (parse/resize/tokenize) + post chain (trim/unnormalize) around L1. Its default
-  latent is generated in the runtime's device buffer.
-* **L3 websocket** — one ``client.infer`` round trip: adds transport (websocket +
-  msgpack) + the server processor pipeline around the bare model. Measured against
-  a *running* server (``--host/--port``); this script attaches, it does not spawn.
+L2 excludes robot-specific processing. Use L3 against a server started with the
+required robot preset to include that processing.
 
-Weights come from a real checkpoint (``--model-dir``) or, when it is omitted, from
-deterministic **synthetic weights** — the checkpoint-free default (equivalent to an
-explicit ``--random-weights``) that runs the engine with no checkpoint on disk
-(latency depends on shape+dtype, not trained values). A checkpoint defaults to its
-*native* config (e.g. pi05_libero_base = H50), matching the LIBERO deployment;
-``--action-horizon`` overrides that (it is a sequence length, not a weight
-dimension), while the remaining shape knobs (``--views/--image-size/
---num-flow-steps/--max-token-len``) are synthetic-only. Synthetic mode covers
-**L0/L1/L2**: L2 wraps the engine in synthetic processors (a fixed-length tokenizer
-+ identity unnormalize, so its actions are latency-only). L3 attaches to a running
-server (``--host/--port``) and needs no local weights — serve with
-``--random-weights`` for a fully checkpoint-free L3.
+Use --model-dir for a checkpoint, or --random-weights for synthetic inputs and
+weights (the default when --model-dir is omitted). Synthetic L2 uses a fixed-length
+tokenizer and identity normalization; its actions are for timing only.
+A checkpoint uses its native shape unless --action-horizon is supplied.
+L3 connects to an existing server and needs no local checkpoint.
 
-    # checkpoint-free engine floor — the zero-config default (no download)
-    python scripts/bench_pi05.py --precision bf16 --views 2 --token-count 10
+    python scripts/bench_pi05.py --model-dir /path/to/model --layer l1,l2
+    python scripts/bench_pi05.py --random-weights --layer l1 --precision bf16
+    python scripts/bench_pi05.py --layer l3 --host 127.0.0.1 --port 8000
 
-    # full in-process breakdown against a checkpoint
-    python scripts/bench_pi05.py --model-dir /path/to/pi05 --layer l0,l1,l2 \
-        --precision bf16 --prompt "put both moka pots on the stove"
-
-    # same checkpoint, forced to a 10-step chunk instead of its native H=50
-    python scripts/bench_pi05.py --model-dir /path/to/pi05 --layer l0,l1,l2 \
-        --precision bf16 --action-horizon 10
-
-    # L3 against a running websocket server
-    python scripts/bench_pi05.py --layer l3 --precision bf16 \
-        --host 127.0.0.1 --port 8000 --prompt "put both moka pots on the stove"
-
-**What L2 is not.** This script is vendored from the engine and its L2 is still
-the engine's policy (``AutoPolicy`` / ``Pi05Policy``), not
-``apxinf_robo.build_robot_policy``. A preset's own pre/post steps therefore sit
-outside the measurement: for ``franka_libero`` that costs nothing, because the
-preset only supplies constructor arguments, but for a preset with wired robot
-steps (``unitree_g1``: state discretization into the prompt, 32→16 action
-encode) the served latency is higher than L2 reports here. Benchmarking a robot
-policy is a ``--robot`` path this script does not have yet. L3 does not have the
-gap -- it measures whatever the server was started with.
+--warmup and --samples default to 10 and 30. --out saves the report as JSON.
 """
 
 from __future__ import annotations
@@ -70,10 +37,7 @@ import time
 import numpy as np
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-# Copied from the engine's own scripts/, where the package sits at
-# ``python/apxinf``. Here the engine is a submodule, so the source-tree import
-# path lives one level deeper -- and so does the commit stamped into a report,
-# which has to stay the *engine's*: that is what the latency is a property of.
+# Import and record the version of the bundled engine.
 _ENGINE_ROOT = _REPO_ROOT / "apxinf"
 _APXINF_PKG = _ENGINE_ROOT / "python" / "apxinf"
 if _APXINF_PKG.is_dir() and str(_APXINF_PKG) not in sys.path:

@@ -4,18 +4,25 @@
 
 # APXinf-robo
 
-ApxInf is a reimagined edge inference engine born of the agentic coding era,
-combining high performance, reliability, and energy efficiency across devices
-with an evolving agentic workflow that radically simplifies custom model development.
+APXinf-robo runs ApxInf models with robot presets, observation and action
+conversion, OpenPI-compatible serving, and LIBERO evaluation. Start with
+`franka_libero` for LIBERO or `unitree_g1` for a compatible G1 checkpoint.
 
-- implemented with system language Rust with no other externel dependencies
-- embodied AI is highest priority, VLA/WAM models on Jetson/DriveOS Thor/Orin
-- Agentically optimized CUDA Kernels
+The ApxInf inference engine is included as the `apxinf/` submodule.
 
-The first version of ApxInf ships with highly optimized PI-0.5 VLA model on Jetson Thor &
-Orin devices, and supports BF16, FP8 and INT8 precisions.
+| Task | Guide |
+|---|---|
+| Install and verify the runtime | [Build APXinf-robo](#build-apxinf-robo) |
+| Run a robot policy | [Python quick start](#run-a-policy-through-python-api) |
+| Connect a robot client | [OpenPI-compatible serving](#openpi-compatible-serving) |
+| Prepare FP8 calibration | [FP8](#fp8) |
+| Evaluate a LIBERO checkpoint | [LIBERO evaluation](#libero-evaluation) |
+| Measure latency | [Benchmark](#benchmark) |
+| Add a robot preset | [Adding an embodiment](doc/adding-an-embodiment.md) |
 
-APXinf-robo carries ApxInf as a git submodule at `apxinf/`.
+Run commands from the **APXinf-robo repository root**, with its Python environment
+activated. Replace `<path-to-model>` with your checkpoint directory; see
+[Get the checkpoint](#get-the-checkpoint) for the published LIBERO checkpoint.
 
 ## Quick start
 
@@ -36,8 +43,9 @@ python scripts/bench_pi05.py --random-weights --precision fp8 --layer l1 \
   --views 2 --token-count 10 --action-horizon 10 --num-flow-steps 10 --autotune
 ```
 
-Reported latency is P50 over 30 samples after 10 warm-up iterations
-(`--warmup` / `--samples`).
+These commands report P50 over 100 samples after 10 warm-up iterations.
+Synthetic inputs check runtime and latency; use [LIBERO evaluation](#libero-evaluation)
+to measure task success.
 
 ### Run a policy through Python API
 
@@ -127,19 +135,18 @@ Then invoke it with the model, the target, and the acceptance bar:
 ApxInf, Jetson Thor, BF16, parity against the reference within 1e-2
 ```
 
-It works from the same guides a human would follow. These live in the engine, so
-they are linked upstream rather than by path: GitHub does not serve a
-submodule's files under this repository's tree, though a recursive clone has
-them all under `apxinf/doc/`.
-- [porting workflow](https://github.com/infinigence/ApxInf/blob/main/doc/porting-workflow.md),
-- [adding a new model](https://github.com/infinigence/ApxInf/blob/main/doc/adding-a-new-model.md),
-- [model-layer architecture](https://github.com/infinigence/ApxInf/blob/main/doc/model-layer-architecture.md),
-- [adding new kernels](https://github.com/infinigence/ApxInf/blob/main/doc/adding-new-kernels.md).
+Guides for the bundled engine version (also available under `apxinf/doc/`):
+
+- [Port a model](https://github.com/infinigence/ApxInf/blob/ba968f63c9820f7db368bea0ce17bb890aa90781/doc/porting-workflow.md)
+- [Add a model implementation](https://github.com/infinigence/ApxInf/blob/ba968f63c9820f7db368bea0ce17bb890aa90781/doc/adding-a-new-model.md)
+- [Model API reference](https://github.com/infinigence/ApxInf/blob/ba968f63c9820f7db368bea0ce17bb890aa90781/doc/model-layer-architecture.md)
+- [Add a CUDA kernel](https://github.com/infinigence/ApxInf/blob/ba968f63c9820f7db368bea0ce17bb890aa90781/doc/adding-new-kernels.md)
 
 ## Build APXinf-robo
 
 ```bash
-git clone --recursive <repo-url> && cd APXinf-robo
+git clone --recursive https://github.com/RLinf/APXinf-robo.git
+cd APXinf-robo
 python3 -m venv .venv && source .venv/bin/activate
 pip install maturin
 CARGO_TARGET_DIR=target/wheel maturin build --release --features cuda --auditwheel skip -m apxinf/crates/apxinf-py/Cargo.toml
@@ -148,14 +155,9 @@ pip install -e "apxinf/python/apxinf[serving]"
 pip install -e ".[libero,serve]"
 ```
 
-Activate a venv or conda env before installing. One extra covers both model
-families: tokenization is native — the binding carries SentencePiece for PI0.5
-and the HF tokenizer for WallOSS — so `serving` only adds the
-msgpack/websockets transport. Drop it for in-process use.
-
-`--features cuda` is a Cargo feature, not a CUDA installation: it compiles the
-CUDA backend into the binding, and it is required — the PI0.5 runtime is only
-registered on CUDA devices, as is WallOSS.
+Install on Linux with an NVIDIA driver, CUDA toolkit, Rust, and `cmake`.
+Use `--features cuda` when building the binding. The `serving` extra installs
+msgpack and websockets; omit it for in-process use.
 
 The build queries the visible GPU for its compute capability and compiles the
 kernels for exactly that architecture, so build on the machine you deploy to;
@@ -169,10 +171,8 @@ python -c 'import apxinf_py; print(apxinf_py.__version__)'
 python scripts/bench_pi05.py --random-weights --precision bf16 --layer l1 --samples 5
 ```
 
-Needs a Linux host with an NVIDIA driver and a CUDA toolkit, a stable Rust
-toolchain, and `cmake` — the binding links SentencePiece statically, which
-builds its C++ library from source. If `nvcc --version`, `cargo --version` or
-`cmake --version` fails, set them up first:
+The import must succeed and the benchmark must complete with latency results.
+If `nvcc --version`, `cargo --version`, or `cmake --version` fails, install:
 
 - [NVIDIA build environment](#nvidia-build-environment)
 - [Rust toolchain](#rust-toolchain)
@@ -181,15 +181,15 @@ builds its C++ library from source. If `nvcc --version`, `cargo --version` or
 
 ## Using APXinf-robo from Python
 
-Three public layers, each wrapping the one before. Pick the outermost one that
-still leaves you the control you need.
+Use `build_robot_policy` for a named robot. Choose another entry point when your
+application supplies its own processing or needs a network service.
 
-All three reach the engine through `apxinf_robo.engine`, the one module in this
-package that imports `apxinf` — so pinning a new submodule SHA is one diff to
-read and a compatibility shim has one place to live. The engine's own names
-(`apxinf.Model`, `apxinf.AutoPolicy`, `apxinf.serving.WebsocketPolicyServer`)
-still work, but they are not this package's seam; see
-[Adding an embodiment](doc/adding-an-embodiment.md).
+| Entry point | Input | Output |
+|---|---|---|
+| `build_robot_policy` | Robot preset, checkpoint, raw observations | Robot actions |
+| `load_policy` | Checkpoint, input field names, raw observations | Policy actions |
+| `load_bare_model` | Preprocessed images, tokens, noise | Normalized model actions |
+| `websocket_server` | A policy and listening address | OpenPI-compatible service |
 
 ### L1 — bare model
 
@@ -208,12 +208,8 @@ model.action_horizon, model.num_views, model.image_size    # what it was loaded 
 
 ### L2 — policy
 
-Adds the pre/post pipelines and reads the checkpoint's tokenizer and
-`norm_stats`, so it takes a raw observation dict and returns deployable actions.
-`build_robot_policy` is the call to reach for: it pairs the checkpoint with a
-robot preset, so the camera keys, state routing, and deployable action width
-come from the robot rather than from the caller. That pairing is what this
-package adds over the engine.
+Pass raw images, state, and a prompt to `build_robot_policy`. The selected
+preset supplies input field names, state processing, and output action width.
 
 ```python
 from apxinf_robo import build_robot_policy
@@ -225,23 +221,13 @@ policy = build_robot_policy(
 
 policy.metadata             # robot, robot_slots, image_keys, state_key, action_horizon, ...
 
-# Pipelines are ordered named steps — image_stack -> tokenize in, trim -> unnormalize
-# out — and every mutation returns a new one. A custom step is any
-# apxinf.processors.ProcessorStep subclass; a bare callable is rejected.
-policy.input_pipeline = policy.input_pipeline.replace("tokenize", MyTokenizeStep())
-policy.output_pipeline = policy.output_pipeline.insert_after(
-    "unnormalize", ("clip", MyClip())
-)
-
 result = policy.infer(observation)
 result["normalized_actions"]  # what L1 returned, before trim + unnormalize
 ```
 
 Each preset field can be overridden per call (`image_keys`, `state_key`,
-`prompt_key`, `action_dim`, `discrete_state`) for a client that already speaks a
-fixed dialect. When no robot applies — vetting a checkpoint, reproducing the
-engine's own numbers — `load_policy` takes the same arguments and gives you the
-checkpoint's own contract with no body attached:
+`prompt_key`, `action_dim`, `discrete_state`) to match your client. To run a checkpoint without a robot preset, use
+`load_policy`:
 
 ```python
 from apxinf_robo import load_policy
@@ -271,10 +257,8 @@ policy = build_robot_policy("unitree_g1", "<path-to-model>", precision="bf16")
 websocket_server(policy, "0.0.0.0", 8000).serve_forever()
 ```
 
-`--robot` selects the wire contract — camera keys, state routing, deployable
-action width — the way OpenPI selects a `TrainConfig`. It is not negotiated at
-connect time, so a checkpoint fine-tuned for another robot must name its preset;
-a mismatch produces wrong actions, not an error.
+Select the preset matching your checkpoint and client with `--robot`. Match the
+client's camera fields, state encoding, and action layout to that preset.
 
 | Preset | Cameras | State | Action |
 |---|---|---|---|
@@ -282,8 +266,7 @@ a mismatch produces wrong actions, not an error.
 | `unitree_g1` | 3 views | 16-dim, discretized into the prompt | delta joints, 32→16 encode |
 
 `--help` lists every preset. If an installed client uses different keys, pass the
-concrete policy fields through `--image-keys` / `--state-key` or register a named
-preset; do not edit the generic server. See
+input fields through `--image-keys` / `--state-key`, or register a preset. See
 [Adding an embodiment](doc/adding-an-embodiment.md).
 
 The server keeps the checkpoint's native action width unless the user supplies
@@ -342,33 +325,40 @@ python3 scripts/calibrate_pi05.py \
   --manifest <path-to-observations.jsonl>
 ```
 
-For the PI0.5 LIBERO checkpoint, capture task-balanced observations directly
-from the native LIBERO10 simulator:
+For LIBERO, first capture observations using the robot preset. This step needs
+[LIBERO and MuJoCo](#run), but no model checkpoint:
 
 ```bash
-python3 scripts/calibrate_pi05.py \
-  --model-dir <path-to-model> \
-  --libero-suite libero_10
+apxinf-robo capture-libero --robot franka_libero --suite libero_10 \
+  --output-dir devlocal/fp8-calibration/observations
 ```
 
-That drives MuJoCo inside the calibrator, under the *engine's* default wire keys.
-To calibrate for the dialect a robot preset actually serves — or to keep MuJoCo
-out of the machine that holds the checkpoint — capture the frames first and hand
-the calibrator the directory:
+The output directory contains one NPZ file per observation. On the calibration
+machine, read those files with the same input fields:
 
 ```bash
-apxinf-robo capture-libero --suite libero_10 --output-dir /tmp/libero-calib
+python scripts/calibrate_pi05.py --model-dir <path-to-model> \
+  --image-key observation/image --image-key observation/wrist_image \
+  --state-key observation/state --prompt-key prompt \
+  --input-dir devlocal/fp8-calibration/observations \
+  --output <path-to-model>/calibration.json
 ```
 
-`capture-libero` prints the matching `calibrate_pi05.py --input-dir` line filled
-in with `--robot`'s keys; run that rather than transcribing them. The captured
-NPZ files are a reviewable, re-runnable artifact, which the in-process path is
-not.
+For another preset, use the field arguments printed by `capture-libero`.
+Keep the NPZ directory to reuse the same inputs in later calibration runs.
+Successful calibration prints the sample count and output profile path. Pass
+that profile to `serve --precision fp8 --calibration <path-to-model>/calibration.json`.
 
-See [PI0.5 FP8 calibration](https://github.com/infinigence/ApxInf/blob/main/doc/pi05-fp8-calibration.md) for
-the Observation format, native LIBERO sampling, and output options. Both native
-paths use the same LIBERO/MuJoCo dependencies as
-[LIBERO evaluation](#libero-evaluation).
+Alternatively, run LIBERO directly on the calibration machine:
+
+```bash
+python scripts/calibrate_pi05.py --model-dir <path-to-model> \
+  --libero-suite libero_10 --output <path-to-model>/calibration.json
+```
+
+This uses the calibrator's default input fields. Override them with `--image-key`,
+`--state-key`, and `--prompt-key` when needed. For NPZ and manifest formats, see
+[PI0.5 FP8 calibration](https://github.com/infinigence/ApxInf/blob/ba968f63c9820f7db368bea0ce17bb890aa90781/doc/pi05-fp8-calibration.md).
 
 ### INT8
 
@@ -455,8 +445,9 @@ That is the published protocol: all 10 LIBERO-10 tasks x 50 episodes at seed 7
   alone.
 - `--backend websocket --host <h> --port <p>` evaluates a running
   [server](#openpi-compatible-serving) instead, on this machine or another. The
-  model flags belong to the server there, and `--precision` only asserts what
-  the server reports, so a mismatch fails at connect instead of skewing a run.
+  model flags belong to the server. At connection, the evaluator checks
+  `--precision` and any published image, state, and prompt field names against
+  `franka_libero`. A mismatch stops the run; unpublished fields are not checked.
   Pass `--norm-stats <path-to-model>/norm_stats.json` to `apxinf-robo serve`
   when serving this checkpoint.
 - Runs are resumable: completed task/trial rows in the JSONL ledger are skipped,
@@ -465,41 +456,40 @@ That is the published protocol: all 10 LIBERO-10 tasks x 50 episodes at seed 7
 
 ## Benchmark
 
-`scripts/bench_pi05.py` times the concentric serving shells so a
-regression can be attributed to the engine, the processors, or the transport.
+Measure latency with a checkpoint:
 
 ```bash
-python scripts/bench_pi05.py --model-dir <path-to-model> --precision bf16 --layer l1,l2
+python scripts/bench_pi05.py --model-dir <path-to-model> --precision bf16 \
+  --layer l1,l2 --warmup 10 --samples 30 --out devlocal/benchmark/results.json
 ```
 
-- `--layer` selects any subset of `l1` (bare model), `l2` (engine policy), `l3`
-  (websocket round trip). L3 attaches to a running server and needs no local
-  weights.
-- `--model-dir` runs a real checkpoint at its native horizon; `--random-weights`
-  runs the engine with no checkpoint on disk, and the shape knobs (`--views`,
-  `--image-size`, `--action-horizon`, `--num-flow-steps`, `--token-count`)
-  select the synthetic workload.
-- `--calibration` is FP8-only and synthetic-only; a checkpoint reads
-  `calibration.json` from its own directory.
-- `--action-horizon` also applies to a checkpoint — the horizon is a sequence
-  length, not a weight dimension — which is what makes a real checkpoint
-  comparable to a synthetic run.
-- `--warmup` / `--samples` set the sampling protocol (default 10 and 30);
-  `--out` writes the report as JSON.
+| Layer | Measurement |
+|---|---|
+| `l0` | Model forward from patch embeddings |
+| `l1` | Model inference from resized RGB, including the Python/Rust call |
+| `l2` | Engine policy, including its preprocessing and postprocessing |
+| `l3` | Client-to-server round trip, including the served policy and transport |
 
-Any registered model type works: `AutoPolicy` dispatches on the checkpoint's
-`config.json`, so the same command benchmarks the next model without a flag
-change.
+L2 excludes robot-specific processing added by `build_robot_policy`. To include
+that processing, start a server with the required robot preset and measure L3:
 
-`l2` is the engine policy, not `build_robot_policy`, so a preset's own pre/post
-steps are outside the measurement. `franka_libero` adds none — it only supplies
-constructor arguments — but `unitree_g1` wires real arithmetic (state
-discretization into the prompt, 32→16 action encode) that `l2` does not time.
-Benchmark that through `l3` against a server started under the preset, or through
-`eval-libero`'s per-segment latency, until this script grows a `--robot` path.
+```bash
+python scripts/bench_pi05.py --layer l3 --precision bf16 \
+  --host 127.0.0.1 --port 8000 --out devlocal/benchmark/server.json
+```
 
-For one-step evaluation, please refer to [run warmstart with onestep](https://github.com/infinigence/ApxInf/blob/main/doc/run_warmstart_with_onestep.md)
+- `--random-weights` runs without a checkpoint. Use `--views`, `--image-size`,
+  `--action-horizon`, `--num-flow-steps`, and `--token-count` to set its workload.
+  Synthetic L2 uses a fixed-length tokenizer and identity normalization.
+- `--action-horizon` also overrides a checkpoint's native horizon.
+- `--calibration` applies to synthetic FP8 runs; checkpoint runs read
+  `calibration.json` from the checkpoint directory.
+- `--warmup` and `--samples` default to 10 and 30. The command prints latency
+  statistics; `--out` also saves JSON. Compare runs with matching layers,
+  precision, input shapes, and sampling settings.
 
+For LIBERO task success and per-segment latency, use [LIBERO evaluation](#libero-evaluation).
+For one-step evaluation, see [Warm-start evaluation](https://github.com/infinigence/ApxInf/blob/ba968f63c9820f7db368bea0ce17bb890aa90781/doc/run_warmstart_with_onestep.md).
 
 ## NVIDIA build environment
 
@@ -534,25 +524,25 @@ Built with Rust 1.95 and 1.96; no minimum supported version is declared.
 
 ## The engine submodule
 
-`apxinf/` is the ApxInf inference engine, pinned by SHA.
+Initialize or restore the engine version recorded by this checkout:
 
-- A fresh clone does not carry it. Initialize it explicitly with
-  `git submodule update --init --recursive`, then install it per
-  [Build APXinf-robo](#build-apxinf-robo).
-- The pin is a SHA, never a branch. Bumping it is a reviewed change and must
-  keep `tests/test_parity.py` green.
-- Use `git submodule update --init --recursive` to restore the recorded SHA.
-  `git submodule update --remote` instead selects a remote branch tip; with no
-  `branch` setting in `.gitmodules`, it defaults to the remote's HEAD. Removing
-  that setting does not prevent updates or enforce the pin. Reserve `--remote`
-  for deliberate engine upgrades, and review the resulting gitlink change.
-- To co-develop against an unpushed engine change, point the submodule at a
-  local checkout for the duration and put it back before committing:
+```bash
+git submodule update --init --recursive
+```
 
-  ```bash
-  git -C apxinf remote add local /path/to/ApxInf && git -C apxinf fetch local
-  ```
+Record the Robo and engine revisions alongside benchmark or evaluation results:
 
+```bash
+git rev-parse HEAD
+git -C apxinf rev-parse HEAD
+git submodule status apxinf
+```
+
+A leading `+` in submodule status means the engine differs from the recorded SHA.
+Use `git submodule update --remote` only for a deliberate engine upgrade; it
+follows the remote default branch when no branch is configured. Before submitting
+an upgrade, review the gitlink diff and run `tests/test_parity.py` with
+`APXINF_PARITY_CHECKPOINT` set to a compatible checkpoint.
 
 ## License
 

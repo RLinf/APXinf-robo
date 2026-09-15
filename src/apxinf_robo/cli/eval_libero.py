@@ -280,15 +280,7 @@ def _observation(base, wrist, state, prompt) -> dict:
 
 
 def _assert_server_speaks_the_same_dialect(metadata) -> None:
-    """Fail at connect if the server's wire keys are not the ones we will send.
-
-    ``_observation`` builds its keys from the preset table, and the server
-    publishes the contract it actually resolved. A mismatch -- a server started
-    under a different ``--robot``, or with ``--image-keys`` overrides -- is
-    otherwise silent: the observation is accepted, the missing keys read as
-    absent inputs, and the run reports a low success rate that looks like an
-    accuracy regression. Metadata the server does not publish is not asserted.
-    """
+    """Check published input fields against the evaluator's preset."""
     convention = libero_convention()
     expected = {
         "image_keys": list(convention.image_keys),
@@ -306,7 +298,7 @@ def _assert_server_speaks_the_same_dialect(metadata) -> None:
             mismatches.append(f"{field}: server {got!r}, evaluator {want!r}")
     if mismatches:
         raise RuntimeError(
-            "server speaks a different LIBERO dialect than "
+            "server input fields do not match the LIBERO evaluator preset "
             f"--robot {LIBERO_PRESET} -- " + "; ".join(mismatches)
         )
 

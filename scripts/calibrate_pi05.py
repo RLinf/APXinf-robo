@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a self-describing PI0.5 static-FP8 profile from business Observations."""
+"""Generate a PI0.5 FP8 calibration profile from representative observations."""
 
 from __future__ import annotations
 
@@ -19,10 +19,7 @@ import numpy as np
 
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
-# Copied from the engine's own scripts/, where the package sits at
-# ``python/apxinf``. Here the engine is a submodule, so both the import path and
-# the revision stamped into a profile live one level deeper -- and the revision
-# has to stay the *engine's*, since that is what the scales are bound to.
+# Import and record the version of the bundled engine.
 _ENGINE_ROOT = _REPO_ROOT / "apxinf"
 _APXINF_PKG = _ENGINE_ROOT / "python" / "apxinf"
 if _APXINF_PKG.is_dir() and str(_APXINF_PKG) not in sys.path:
@@ -59,13 +56,12 @@ def parse_args(argv=None):
             "| --input-dir DIR | SOURCE) [--output PATH]"
         ),
         description=(
-            "Generate a checkpoint-bound PI0.5 FP8 profile from representative "
-            "business Observations. Native LIBERO, manifest, and NPZ sources are "
-            "supported. --libero-suite drives the simulator here and needs LIBERO "
-            "installed; capturing the frames elsewhere -- `apxinf-robo "
-            "capture-libero` writes them under a robot preset's wire keys -- and "
-            "passing --input-dir an NPZ directory is the right seam for a "
-            "deployment that owns its own environment."
+            "Generate a PI0.5 FP8 calibration profile for a checkpoint. "
+            "Run from the APXinf-robo repository root. Use --input-dir for NPZ "
+            "observations recorded by apxinf-robo capture-libero, --manifest for "
+            "JSONL, or --libero-suite to run the simulator here. NPZ and JSONL "
+            "inputs do not require LIBERO on the calibration machine. "
+            "--output defaults to MODEL_DIR/calibration.json."
         ),
     )
     parser.add_argument("--model-dir", required=True, type=pathlib.Path)

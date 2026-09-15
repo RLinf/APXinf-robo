@@ -1,30 +1,16 @@
 #!/usr/bin/env python3
-"""``apxinf-robo capture-libero`` -- write LIBERO observations for FP8 calibration.
+r"""Capture LIBERO observations as NPZ files for FP8 calibration.
 
-``scripts/calibrate_pi05.py`` builds a checkpoint-bound FP8 profile from
-representative observations. It can drive LIBERO itself (``--libero-suite``), but
-only under the engine's own wire keys: MuJoCo it can run, a robot preset it
-cannot know.
+Run from the APXinf-robo repository root. Requires LIBERO, MuJoCo, and the
+Robo Python package; no model checkpoint is needed. Each NPZ contains one
+observation using the selected robot preset's input field names.
 
-This command is the other half. It captures task-balanced frames from native
-LIBERO initial states and writes one NPZ per observation, keyed by the wire keys
-of a named robot preset -- the dialect the policy will later be served with, and
-therefore the dialect the calibrator has to be told:
+    apxinf-robo capture-libero --robot franka_libero --suite libero_10 \
+        --output-dir devlocal/fp8-calibration/observations
 
-    apxinf-robo capture-libero --suite libero_10 --output-dir /tmp/libero-calib
-    python scripts/calibrate_pi05.py --model-dir /ckpt/pi05_libero \
-        --image-key observation/image --image-key observation/wrist_image \
-        --input-dir /tmp/libero-calib --output /ckpt/pi05_libero/calibration.json
-
-``run`` prints that second line filled in for whichever ``--robot`` was given,
-because the keys are the preset's and nothing else should be transcribing them.
-
-Writing the frames out rather than streaming them into the calibrator is the
-point: the calibration input becomes a reviewable, re-runnable artifact instead
-of a side effect of a rollout that nobody can reproduce.
-
-Needs LIBERO and MuJoCo (``pip install apxinf-robo[libero]`` plus LIBERO itself).
-It needs no GPU and no checkpoint.
+After capture, run the printed scripts/calibrate_pi05.py command from the Robo
+root, replacing <ckpt> with your checkpoint path. If calibrating on another
+machine, copy the NPZ directory and update --input-dir in that command.
 """
 
 from __future__ import annotations
@@ -38,9 +24,7 @@ import numpy as np
 
 from ..envs.libero import make_env, to_apxinf_observation
 
-#: The preset whose wire keys the captured NPZ files are written under. Same
-#: default as ``eval-libero``, for the same reason: what is captured has to match
-#: what is served, and both read the dialect from the preset table.
+#: Default input field names, shared with LIBERO evaluation.
 LIBERO_PRESET = "franka_libero"
 
 ALL_SUITES = (
@@ -59,10 +43,8 @@ WAIT_STEPS = 10
 #: Open gripper, no motion -- the same dummy used while eval-libero settles.
 NEUTRAL_ACTION = [0.0] * 6 + [-1.0]
 
-#: Where the calibrator lives relative to a checkout of this repository. It is
-#: the vendored copy under ``scripts/``, not the one inside the submodule, so
-#: this line and README.md name the same file and a submodule bump cannot move
-#: it out from under the printed command.
+#: Calibrator path relative to the Robo repository root.
+
 CALIBRATE_SCRIPT = "scripts/calibrate_pi05.py"
 
 
@@ -71,13 +53,7 @@ def _progress(message: str) -> None:
 
 
 def _calibrate_command(convention, output_dir) -> str:
-    """The ``calibrate_pi05.py`` invocation that reads back what was just written.
-
-    The engine defaults its wire keys to the model's own slot names, not to any
-    preset, so a captured directory has to name its dialect explicitly. Building
-    the line from the same convention the capture used keeps the two from
-    drifting -- and means nobody has to transcribe keys out of a preset table.
-    """
+    """Build a calibration command using the captured observation field names."""
     flags = [f"--image-key {key}" for key in convention.image_keys]
     flags.append(f"--state-key {convention.state_key}")
     flags.append(f"--prompt-key {convention.prompt_key}")

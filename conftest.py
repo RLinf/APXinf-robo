@@ -1,17 +1,7 @@
-"""Keep the repository root off ``sys.path`` during collection.
+"""Keep the checkout namespace off the test import path.
 
-The engine submodule is checked out at ``apxinf/``, which is also the name of the
-package it installs. With the repository root on ``sys.path``, that directory
-can resolve as an empty namespace when the engine is missing or interfere with
-some editable-install finders. Ordinary installed packages take precedence over
-namespace directories. The failure can surface later and elsewhere as
-``cannot import name 'Pi05Policy' from 'apxinf' (unknown location)``, which reads
-like a version mismatch rather than a shadowed name.
-
-This makes collection independent of whether the invocation adds the repository
-root to the import path. Dropping the entry is safe: nothing in this
-repository is imported from the root -- the package lives under ``src/`` and the
-tests import it by name.
+The apxinf/ submodule can interfere with editable-install finders. Removing the
+repository root makes collection independent of the pytest invocation.
 """
 
 import pathlib

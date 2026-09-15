@@ -1,15 +1,6 @@
-"""Native LIBERO observation conversion, re-exported for the vendored scripts.
+"""LIBERO conversion helpers shared with apxinf_robo.envs.libero.
 
-The conversions themselves live in :mod:`apxinf_robo.envs.libero` and are *not*
-restated here. Evaluation (``apxinf-robo eval-libero``), capture
-(``apxinf-robo capture-libero``), and calibration (``scripts/calibrate_pi05.py``)
-must agree on camera orientation and robot-state layout down to the byte: a
-divergence there changes success rates and FP8 scales with no error anywhere, and
-the goldens in ``tests/test_libero_observation.py`` only pin the package copy.
-
-This module exists because the engine's ``scripts/pi05_calibration_data.py`` --
-which this repository vendors -- imports it by that name. It is a shim, not a
-mirror.
+These exports preserve imports used by the Robo calibration scripts.
 """
 
 from __future__ import annotations
