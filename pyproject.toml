@@ -25,9 +25,9 @@ dependencies = [
 # falls back to a plain object when it is absent, which is what keeps
 # tests/test_rlinf_*.py runnable on a laptop.
 rlinf = []
-libero = ["pillow", "openpi-client"]
-robosuite = ["pillow", "openpi-client"]
-isaaclab = ["pillow", "openpi-client"]
+libero = ["pillow", "openpi-client", "typing-extensions"]
+robosuite = ["pillow", "openpi-client", "typing-extensions"]
+isaaclab = ["pillow", "openpi-client", "typing-extensions"]
 lerobot = ["torch"]
 serve = ["websockets", "msgpack"]
 dev = ["pytest>=7", "ruff"]
