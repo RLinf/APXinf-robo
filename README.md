@@ -128,7 +128,7 @@ Then invoke it with the model, the target, and the acceptance bar:
 ApxInf, Jetson Thor, BF16, parity against the reference within 1e-2
 ```
 
-Guides for the bundled engine version (also available under `apxinf/doc/`):
+The workflow follows these guides to implement and validate the model port:
 
 - [Port a model](https://github.com/infinigence/ApxInf/blob/ba968f63c9820f7db368bea0ce17bb890aa90781/doc/porting-workflow.md)
 - [Add a model implementation](https://github.com/infinigence/ApxInf/blob/ba968f63c9820f7db368bea0ce17bb890aa90781/doc/adding-a-new-model.md)
@@ -482,7 +482,8 @@ python scripts/bench_pi05.py --layer l3 --precision bf16 \
   precision, input shapes, and sampling settings.
 
 For LIBERO task success and per-segment latency, use [LIBERO evaluation](#libero-evaluation).
-For one-step evaluation, see [Warm-start evaluation](https://github.com/infinigence/ApxInf/blob/ba968f63c9820f7db368bea0ce17bb890aa90781/doc/run_warmstart_with_onestep.md).
+
+For one-step evaluation, see [Run warm-start with one-step](https://github.com/infinigence/ApxInf/blob/ba968f63c9820f7db368bea0ce17bb890aa90781/doc/run_warmstart_with_onestep.md).
 
 ## NVIDIA build environment
 
