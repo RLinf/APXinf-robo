@@ -36,7 +36,8 @@ python scripts/bench_pi05.py --random-weights --precision fp8 --layer l1 \
   --views 2 --token-count 10 --action-horizon 10 --num-flow-steps 10 --autotune
 ```
 
-These commands report P50 over 100 samples after 10 warm-up iterations.
+These commands report P50 after 10 warm-up iterations. `--samples` selects the
+measurement count (100 in the BF16 example, 30 by default).
 Synthetic inputs check runtime and latency; use [LIBERO evaluation](#libero-evaluation)
 to measure task success.
 
@@ -144,28 +145,31 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install maturin
 CARGO_TARGET_DIR=target/wheel maturin build --release --features cuda --auditwheel skip -m apxinf/crates/apxinf-py/Cargo.toml
 pip install --force-reinstall target/wheel/wheels/apxinf_py-*.whl
-pip install "./apxinf/python/apxinf[serving]"
+pip install -e "./apxinf/python/apxinf[serving]" --config-settings editable_mode=strict
 pip install -e ".[libero,serve]"
 ```
 
 Install on Linux with an NVIDIA driver, CUDA toolkit, Rust, and `cmake`.
 Use `--features cuda` when building the binding. The `serving` extra installs
-msgpack and websockets; omit it for in-process use. Reinstall the engine Python
-package after changing its source or updating the submodule.
+msgpack and websockets; omit it for in-process use. Strict editable installation
+picks up edits to existing engine Python files without reinstalling. Reinstall
+after adding modules or changing dependencies, and keep its generated
+`apxinf/python/apxinf/build/__editable__.*` directory.
 
 The build queries the visible GPU for its compute capability and compiles the
 kernels for exactly that architecture, so build on the machine you deploy to;
 cross-compiling fails unless `APXINF_CUDA_ARCH` names the target (`sm_87` Orin,
 `sm_101` Thor-U, `sm_110` Thor).
 
-Confirm the binding imports and reaches the GPU:
+Check the compiled extension, the Robo package, and GPU inference:
 
 ```bash
 python -c 'import apxinf_py; print(apxinf_py.__version__)'
+python -c 'import apxinf_robo; print(apxinf_robo.__version__)'
 python scripts/bench_pi05.py --random-weights --precision bf16 --layer l1 --samples 5
 ```
 
-The import must succeed and the benchmark must complete with latency results.
+Both imports must succeed and the benchmark must complete with latency results.
 If `nvcc --version`, `cargo --version`, or `cmake --version` fails, install:
 
 - [NVIDIA build environment](#nvidia-build-environment)
@@ -377,8 +381,8 @@ The published accuracy is `pi05_libero_base`, π0.5 fine-tuned on LIBERO — an
 arbitrary π0.5 checkpoint might not reproduce it.
 
 ```bash
-pip install -U "huggingface_hub[cli]"
-huggingface-cli download lerobot/pi05_libero_base --local-dir <path-to-model>
+pip install -U huggingface_hub
+hf download lerobot/pi05_libero_base --local-dir <path-to-model>
 curl -fL https://storage.googleapis.com/openpi-assets/checkpoints/pi05_libero/assets/physical-intelligence/libero/norm_stats.json \
   -o <path-to-model>/norm_stats.json
 ```
@@ -405,8 +409,9 @@ pip install -e <path-to-libero>
 export MUJOCO_GL=egl                               # headless; osmesa if the machine has no EGL
 ```
 
-That numpy pin is the one thing to watch: it predates Python 3.11, so on a newer
-interpreter it has no wheel and builds from source. `--no-deps` skips it.
+LIBERO pins NumPy 1.22.4, which is incompatible with Python 3.12. Use a
+compatible simulator environment; `--no-deps` does not skip packages explicitly
+listed in `requirements.txt`.
 
 `--backend websocket` additionally needs `openpi-client`, from an openpi
 checkout:

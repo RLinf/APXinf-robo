@@ -12,7 +12,7 @@ import pytest
 def test_missing_engine_keeps_install_instructions(tmp_path, namespace):
     result = _probe_import(tmp_path, namespace=namespace, installed=False)
     assert result.returncode != 0
-    assert "pip install ./apxinf/python/apxinf" in result.stderr
+    assert "pip install -e ./apxinf/python/apxinf --config-settings editable_mode=strict" in result.stderr
     assert "git submodule update --init --recursive" in result.stderr
     assert "instead of the installed engine" not in result.stderr
     if namespace:

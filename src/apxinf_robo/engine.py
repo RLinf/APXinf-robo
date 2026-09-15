@@ -52,7 +52,7 @@ _INSTALL_HINT = (
     "pip dependency, because it is a Rust/PyO3/CUDA build that has to be "
     "compiled for the target machine:\n"
     "    git submodule update --init --recursive\n"
-    "    pip install ./apxinf/python/apxinf\n"
+    "    pip install -e ./apxinf/python/apxinf --config-settings editable_mode=strict\n"
     "and build the apxinf_py extension with maturin for anything that runs a model."
 )
 
