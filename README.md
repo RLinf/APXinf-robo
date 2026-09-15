@@ -4,25 +4,18 @@
 
 # APXinf-robo
 
-APXinf-robo runs ApxInf models with robot presets, observation and action
-conversion, OpenPI-compatible serving, and LIBERO evaluation. Start with
-`franka_libero` for LIBERO or `unitree_g1` for a compatible G1 checkpoint.
+ApxInf is a reimagined edge inference engine born of the agentic coding era,
+combining high performance, reliability, and energy efficiency across devices
+with an evolving agentic workflow that radically simplifies custom model development.
 
-The ApxInf inference engine is included as the `apxinf/` submodule.
+- implemented with system language Rust with no other externel dependencies
+- embodied AI is highest priority, VLA/WAM models on Jetson/DriveOS Thor/Orin
+- Agentically optimized CUDA Kernels
 
-| Task | Guide |
-|---|---|
-| Install and verify the runtime | [Build APXinf-robo](#build-apxinf-robo) |
-| Run a robot policy | [Python quick start](#run-a-policy-through-python-api) |
-| Connect a robot client | [OpenPI-compatible serving](#openpi-compatible-serving) |
-| Prepare FP8 calibration | [FP8](#fp8) |
-| Evaluate a LIBERO checkpoint | [LIBERO evaluation](#libero-evaluation) |
-| Measure latency | [Benchmark](#benchmark) |
-| Add a robot preset | [Adding an embodiment](doc/adding-an-embodiment.md) |
+The first version of ApxInf ships with highly optimized PI-0.5 VLA model on Jetson Thor &
+Orin devices, and supports BF16, FP8 and INT8 precisions.
 
-Run commands from the **APXinf-robo repository root**, with its Python environment
-activated. Replace `<path-to-model>` with your checkpoint directory; see
-[Get the checkpoint](#get-the-checkpoint) for the published LIBERO checkpoint.
+APXinf-robo carries ApxInf as a git submodule at `apxinf/`.
 
 ## Quick start
 
