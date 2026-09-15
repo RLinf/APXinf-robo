@@ -458,7 +458,6 @@ python scripts/bench_pi05.py --model-dir <path-to-model> --precision bf16 \
 
 | Layer | Measurement |
 |---|---|
-| `l0` | Model forward from patch embeddings |
 | `l1` | Model inference from resized RGB, including the Python/Rust call |
 | `l2` | Engine policy, including its preprocessing and postprocessing |
 | `l3` | Client-to-server round trip, including the served policy and transport |
@@ -532,7 +531,8 @@ git -C apxinf rev-parse HEAD
 git submodule status apxinf
 ```
 
-A leading `+` in submodule status means the engine differs from the recorded SHA.
+If the output starts with `+`, the engine is checked out at a different commit
+from the one recorded by this Robo checkout.
 Use `git submodule update --remote` only for a deliberate engine upgrade; it
 follows the remote default branch when no branch is configured. Before submitting
 an upgrade, review the gitlink diff and run `tests/test_parity.py` with

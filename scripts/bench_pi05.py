@@ -2,7 +2,6 @@
 """Measure PI0.5 latency. Run from the APXinf-robo repository root.
 
 Layers:
-  l0  Model forward from patch embeddings.
   l1  Model inference from resized RGB, including the Python/Rust call.
   l2  Engine policy with preprocessing and postprocessing.
   l3  Client/server round trip, including the served policy and transport.
@@ -113,7 +112,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--layer",
         default=None,
-        help="comma list of l0,l1,l2,l3 or `all` (default: all with --model-dir, else l0,l1)",
+        help="comma-separated measurements: l1,l2,l3; pass explicitly to select layers",
     )
     p.add_argument("--precision", choices=("bf16", "fp8", "int8"), default="bf16")
     p.add_argument("--model", default="pi05", help="model name for the random-weights engine")
@@ -129,7 +128,7 @@ def parse_args() -> argparse.Namespace:
     source = p.add_mutually_exclusive_group(required=False)
     source.add_argument("--model-dir", type=pathlib.Path, help="checkpoint dir/index (real weights)")
     source.add_argument(
-        "--random-weights", action="store_true", help="checkpoint-free engine (L0/L1/L2)"
+        "--random-weights", action="store_true", help="benchmark with synthetic weights"
     )
     p.add_argument(
         "--tokenizer",
@@ -169,7 +168,7 @@ def parse_args() -> argparse.Namespace:
 
     # Input workload.
     p.add_argument("--prompt", default=PROMPT_T10, help="prompt for checkpoint/L2/L3 tokenize")
-    p.add_argument("--token-count", type=int, default=10, help="synthetic token count (random L0/L1)")
+    p.add_argument("--token-count", type=int, default=10, help="token count for synthetic model inputs")
 
     # L3 server.
     p.add_argument("--host", default="127.0.0.1")
