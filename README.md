@@ -554,6 +554,16 @@ an upgrade, review the gitlink diff and run `tests/test_parity.py` with
 `APXINF_PARITY_CHECKPOINT` set to a compatible checkpoint.
 
 
+If you use onestep with warm-start in APXInf-robo, you can cite our paper:
+```bibtex
+@article{li2026step,
+  title={STEP: Warm-started visuomotor policies with spatiotemporal consistency prediction},
+  author={Li, Jinhao and Cong, Yuxuan and Wang, Yingqiao and Xia, Hao and Huang, Shan and Zhang, Yijia and Xu, Ningyi and Dai, Guohao},
+  journal={arXiv preprint arXiv:2602.08245},
+  year={2026}
+}
+```
+
 ## Acknowledgement
 
 The development of APXInf has been inspired by, and benefits from, the ideas and tooling of the broader open-source community.
