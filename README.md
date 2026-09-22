@@ -98,7 +98,7 @@ steady-state CUDA Graph replay P50.
 | RTX 4090 | BF16 | 31.38 ms | 31.9 Hz |
 | RTX 4090 | INT8 | 25.99 ms | 38.5 Hz |
 
-With onestep action generation pruning.
+With onestep action generation pruning. We integrate STEP (https://arxiv.org/pdf/2602.08245), the ICML 2026 warm-start few-step method, into this repo.
 
 | Hardware | Precision | Latency | Throughput |
 |---|---|---:|---:|
