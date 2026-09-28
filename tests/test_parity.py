@@ -145,13 +145,13 @@ class BareInterfaceLoadTest(unittest.TestCase):
 
         class _FakeModel:
             @staticmethod
-            def load(model, path, device, precision, **kwargs):
-                self.loaded.append((model, path, device, precision, kwargs))
+            def load(model, path, device, **kwargs):
+                self.loaded.append((model, path, device, kwargs.get("model_variant", kwargs.get("precision")), kwargs))
                 return _FakeBare()
 
         original_require = engine.require_apxinf
         original_resolve = engine.resolve_tactics
-        engine.require_apxinf = lambda: type("_FakeApxInf", (), {"Model": _FakeModel})
+        engine.require_apxinf = lambda: type("_FakeApxInf", (), {"ModelRunner": _FakeModel})
         engine.resolve_tactics = lambda *a, **kw: "/tuning/thor-sm110/tactics.json"
 
         def restore() -> None:
@@ -162,6 +162,7 @@ class BareInterfaceLoadTest(unittest.TestCase):
 
     def test_tactics_are_resolved_by_default(self) -> None:
         self.engine.load_bare_model("/ckpt", device="cuda:0", precision="bf16")
+        self.assertEqual(self.loaded[0][4]["model_variant"], "bf16")
         self.assertEqual(
             self.loaded[0][4].get("tactics"), "/tuning/thor-sm110/tactics.json"
         )
@@ -271,7 +272,7 @@ class RecordingModelTest(unittest.TestCase):
 class NumericParityTest(unittest.TestCase):
     """One checkpoint, two interfaces, identical bits.
 
-    Both bare handles are loaded on this thread on purpose: ``Model.load``
+    Both bare handles are loaded on this thread on purpose: ``ModelRunner.load``
     returns an ``unsendable`` handle whose CUDA context is bound to its creating
     thread.
 
@@ -287,8 +288,8 @@ class NumericParityTest(unittest.TestCase):
         policy = build_robot_policy(
             ROBOT, CHECKPOINT, device=DEVICE, precision=PRECISION
         )
-        recorder = _RecordingModel(policy.model)
-        policy.model = recorder
+        recorder = _RecordingModel(policy.model_runner)
+        policy.model_runner = recorder
 
         # Pin the noise: with internal sampling the two runs draw from different
         # RNG streams and would differ for a reason that is not drift.

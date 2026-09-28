@@ -17,7 +17,7 @@ ApxInf exposes two interfaces, and this is where a caller picks one:
     you have a reason not to.
 
 ``interface="bare"`` (L1)
-    ``apxinf.Model.load(...)`` -> ``Model.infer_rgb(rgb_u8, layout, token_ids,
+    ``apxinf.ModelRunner.load(...)`` -> ``ModelRunner.infer_rgb(rgb_u8, layout, token_ids,
     noise=)``. The caller supplies already-preprocessed tensors. This exists for
     frameworks that bring their own transforms (RLinf's vendored openpi, for
     instance) and do not want a second implementation of them in the loop.
@@ -105,12 +105,35 @@ def require_apxinf():
 def load_policy(model_dir, **kwargs):
     """L2: dispatch ``model_dir`` to its concrete policy.
 
-    ``kwargs`` reach the policy's ``from_pretrained`` unchanged — ``image_keys``
-    / ``state_key`` / ``prompt_key`` / ``discrete_state`` / ``action_dim`` /
-    ``device`` / ``precision`` / ``model_type`` / ``metadata`` / ...
+    ``kwargs`` reach the concrete policy. Robo's legacy ``precision`` maps to
+    PI0.5's ``model_variant``; other families retain their own loading options.
     """
     apxinf = require_apxinf()
+    # Robo's --precision predates PI0.5's model_variant option. Preserve the
+    # public CLI spelling while passing the family's actual loading contract.
+    if "precision" in kwargs and "model_variant" not in kwargs:
+        import json
+
+        model_type = kwargs.get("model_type")
+        if model_type is None:
+            config = pathlib.Path(model_dir) / "config.json"
+            document = json.loads(config.read_text()) if config.is_file() else {}
+            model_type = document.get("type", document.get("model_type", "pi05"))
+        if model_type == "pi05":
+            kwargs["model_variant"] = _pi05_variant(kwargs.pop("precision"))
     return apxinf.AutoPolicy.from_pretrained(model_dir, **kwargs)
+
+
+def _pi05_variant(precision: str) -> str:
+    try:
+        return {
+            "auto": "auto",
+            "bf16": "bf16",
+            "fp8": "fp8_static",
+            "int8": "int8_dynamic",
+        }[precision]
+    except KeyError as exc:
+        raise ValueError(f"unsupported PI0.5 precision {precision!r}") from exc
 
 
 # Model families whose L2 loader resolves tuned GEMM tactics for itself.
@@ -157,13 +180,18 @@ def load_bare_model(
     if "tactics" not in kwargs:
         if model in _TACTICS_RESOLVED_BY_L2:
             tactics = resolve_tactics(
-                device, precision, model_dir=model_dir, allow_missing=True
+                device, _pi05_variant(precision), model_dir=model_dir, allow_missing=True
             )
             if tactics:
                 kwargs["tactics"] = str(tactics)
     elif kwargs["tactics"] is None:
         del kwargs["tactics"]
-    return apxinf.Model.load(model, str(model_dir), device, precision, **kwargs)
+    option = (
+        {"model_variant": _pi05_variant(precision)}
+        if model == "pi05"
+        else {"precision": precision}
+    )
+    return apxinf.ModelRunner.load(model, str(model_dir), device=device, **option, **kwargs)
 
 
 # --- checkpoint-free path ----------------------------------------------------
@@ -205,14 +233,16 @@ def resolve_tactics(
 def load_random_model(**kwargs):
     """Build a checkpoint-free engine handle with deterministic random weights.
 
-    ``kwargs`` are ``apxinf_py.Model.random``'s: ``model`` / ``device`` /
+    ``kwargs`` are ``apxinf_py.ModelRunner.random``'s: ``model`` / ``device`` /
     ``precision`` / ``num_views`` / ``image_size`` / ``action_horizon`` /
     ``action_dim`` / ``num_flow_steps`` / ``max_token_len`` / ``calibration`` /
     ``tactics`` / ``autotune`` / ``seed``.
     """
     import apxinf_py  # lazy: only this path needs the CUDA binding at import time
 
-    return apxinf_py.Model.random(**kwargs)
+    if "precision" in kwargs and "model_variant" not in kwargs:
+        kwargs["model_variant"] = _pi05_variant(kwargs.pop("precision"))
+    return apxinf_py.ModelRunner.random(**kwargs)
 
 
 def policy_from_random(handle, **kwargs):

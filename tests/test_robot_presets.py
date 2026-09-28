@@ -572,7 +572,7 @@ class PolicyCompositionTest(unittest.TestCase):
         # Rewiring, not a second load: two handles on one GPU allocation would
         # double the checkpoint's memory and make close() order matter.
         base = self._base()
-        self.assertIs(base.with_adapter().model, base.model)
+        self.assertIs(base.with_adapter().model_runner, base.model_runner)
 
     def test_a_wrapper_cannot_shadow_a_step_it_does_not_own(self) -> None:
         with self.assertRaises(ValueError) as caught:
@@ -616,6 +616,9 @@ class UnitreeG1AdapterTest(unittest.TestCase):
             # forwards the rest to a concrete from_pretrained that has **no**
             # **kwargs. Binding against that signature reproduces the TypeError
             # serving would raise, which is why this stub is not a bare Mock.
+            if model_type == "pi05" and "precision" in kwargs:
+                from apxinf_robo.engine import _pi05_variant
+                kwargs["model_variant"] = _pi05_variant(kwargs.pop("precision"))
             inspect.signature(Pi05Policy.from_pretrained).bind(model_dir, **kwargs)
             captured.update(kwargs, model_dir=model_dir, model_type=model_type)
             return policy
@@ -633,7 +636,7 @@ class UnitreeG1AdapterTest(unittest.TestCase):
                 "unitree_g1", "/nowhere", model_type="pi05", precision="bf16"
             )
         self.assertEqual(captured["model_type"], "pi05")
-        self.assertEqual(captured["precision"], "bf16")
+        self.assertEqual(captured["model_variant"], "bf16")
         self.assertEqual(captured["state_key"], G1_STATE_KEY)
         # Loaded at full model width: delta->absolute must see the whole action
         # before g1_encode truncates it to 16.
@@ -951,7 +954,7 @@ class ImageSlotOrderTest(unittest.TestCase):
         # argument is impossible; ignoring it would serve a shape nobody asked for.
         with self.assertRaises(ValueError) as caught:
             Pi05Policy.from_pretrained(
-                "/nonexistent", model=MockModel(num_views=3), num_views=2
+                "/nonexistent", model_runner=MockModel(num_views=3), num_views=2
             )
         self.assertIn("pass num_views to the load call", str(caught.exception))
 
@@ -1240,7 +1243,7 @@ class NormalizationDtypeTest(unittest.TestCase):
         with mock.patch.object(pi05_module, "PromptTokenizer", lambda *a, **k: RecordingTokenizer()):
             return Pi05Policy.from_pretrained(
                 self._checkpoint(),
-                model=MockModel(num_views=len(G1_CAMERAS)),
+                model_runner=MockModel(num_views=len(G1_CAMERAS)),
                 discrete_state=True,
                 state_key=G1_STATE_KEY,
                 image_keys=G1_CAMERAS,

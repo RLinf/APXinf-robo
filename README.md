@@ -116,6 +116,12 @@ is 92.4%.
 | Jetson AGX Thor | FP8 | 500 | 461 | 92.2% |
 | Jetson AGX Orin | BF16 | 500 | 460 | 92.0% |
 
+### Qwen-Drive
+
+Jetson AGX Thor SM110, BF16 direct planning, batch 1, 10 flow steps and 12 input
+frames: request P50 **498.78 ms** from decoded images to host trajectory.
+[Test setup and results](https://github.com/infinigence/ApxInf/blob/82b30e52fc5a222730ad5e2bc998e95a11abf110/doc/qwen-drive-benchmark.md).
+
 
 ## Port a new model with an agent
 

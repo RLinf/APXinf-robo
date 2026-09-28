@@ -172,7 +172,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         "the synthetic view count under --random-weights.",
     )
     # Synthetic-shape knobs, used only with --random-weights (a checkpoint runs its
-    # native config). They mirror apxinf_py.Model.random.
+    # native config). They mirror apxinf_py.ModelRunner.random.
     parser.add_argument("--image-size", type=int, default=224, help="random: image edge")
     parser.add_argument("--num-flow-steps", type=int, default=10, help="random: flow steps")
     parser.add_argument("--max-token-len", type=int, default=200, help="random: max prompt tokens")

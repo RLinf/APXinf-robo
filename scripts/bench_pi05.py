@@ -299,7 +299,8 @@ def main() -> None:
 
     if in_process:
         if random:
-            from apxinf import Model
+            from apxinf import ModelRunner
+            from apxinf_robo.engine import _pi05_variant
 
             # Random engines bypass Pi05Policy.from_pretrained, so this synthetic
             # benchmark is the sole caller that must resolve the package default.
@@ -319,10 +320,10 @@ def main() -> None:
                 # Synthetic FP8 has no calibration file; a uniform scale keeps the
                 # FP8 path on (the kernel falls back to a default tactic).
                 calibration = "uniform:1.0"
-            handle = Model.random(
+            handle = ModelRunner.random(
                 model=args.model,
                 device=args.device,
-                precision=args.precision,
+                model_variant=_pi05_variant(args.precision),
                 num_views=args.views if args.views is not None else 2,
                 image_size=args.image_size if args.image_size is not None else 224,
                 action_horizon=args.action_horizon if args.action_horizon is not None else 10,
@@ -376,7 +377,7 @@ def main() -> None:
             patch_width = 3 * handle.patch_size * handle.patch_size
             patches = np.zeros((patch_rows, patch_width), dtype=np.float32)
         else:
-            from apxinf import AutoPolicy
+            from apxinf_robo.engine import load_policy
 
             options = {
                 "tactics": args.tactics,
@@ -386,14 +387,14 @@ def main() -> None:
             }
             if args.autotune:
                 options["autotune"] = True
-            policy = AutoPolicy.from_pretrained(
+            policy = load_policy(
                 args.model_dir,
                 model_type=args.model_type,
                 device=args.device,
                 precision=args.precision,
                 **{name: value for name, value in options.items() if value is not None},
             )
-            handle = policy.model
+            handle = policy.model_runner
             rng = np.random.default_rng(0)
             model_type = str(policy.metadata.get("model_type", "pi05"))
             image_keys = tuple(
