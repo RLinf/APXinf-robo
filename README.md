@@ -15,7 +15,8 @@ with an evolving agentic workflow that radically simplifies custom model develop
 The first version of ApxInf ships with highly optimized PI-0.5 VLA model on Jetson Thor &
 Orin devices, and supports BF16, FP8 and INT8 precisions.
 
-APXinf-robo carries ApxInf as a git submodule at `apxinf/`.
+APXinf-robo focus on bridging ApxInf with embodied Simulators, Benchmarks and Physical Bodies,
+it takes ApxInf as core inference engine in a git submodule at `apxinf/`.
 
 ## Quick start
 
@@ -87,6 +88,8 @@ actions = client.infer(observation)["actions"]
 
 ## Performance
 
+### PI0.5
+
 Two views, 224x224 NHWC `uint8`, 10 flow steps, `H=10`, batch 1. Latency is
 steady-state CUDA Graph replay P50.
 
@@ -115,6 +118,28 @@ is 92.4%.
 | Jetson AGX Thor | BF16 | 500 | 464 | 92.8% |
 | Jetson AGX Thor | FP8 | 500 | 461 | 92.2% |
 | Jetson AGX Orin | BF16 | 500 | 460 | 92.0% |
+
+### PI0-FAST
+
+Two views, 224x224 NHWC `uint8`, batch 1.
+
+| Hardware | Precision | Prefix | Per Token |
+|---|---|---:|---:|
+| Jetson AGX Thor | BF16 | 33.1 ms | 17.16 ms |
+| Jetson AGX Thor | FP8 | 31.0 ms | 9.68 ms |
+| Jetson AGX Orin | BF16 | 117.3 ms | 25.34 ms |
+| RTX 4090 | BF16 | 20.9 ms | 5.24 ms |
+
+### GR00T N1.7
+
+One or two views, batch 1. Best recorded P50.
+
+| Hardware | Precision | 1-view P50 | 2-view P50 |
+|---|---|---:|---:|
+| Jetson AGX Thor | BF16 | 51.834 ms | 54.216 ms |
+| Jetson AGX Thor | FP8 | 32.557 ms | 35.436 ms |
+| Jetson AGX Orin | BF16 | 75.778 ms | 84.864 ms |
+| Jetson AGX Orin | W8A8 | 56.711 ms | 64.924 ms |
 
 ### Qwen-Drive
 
@@ -574,6 +599,7 @@ If you use onestep with warm-start in APXInf-robo, you can cite our paper:
 
 The development of APXInf has been inspired by, and benefits from, the ideas and tooling of the broader open-source community.
 In particular, we would like to thank the teams and contributors behind
+[flashinfer](https://github.com/flashinfer-ai/flashinfer),
 [FasterTransformer](https://github.com/NVIDIA/FasterTransformer),
 [TensorRT-LLM](https://github.com/NVIDIA/TensorRT-LLM),
 [llama.cpp](https://github.com/ggml-org/llama.cpp),
