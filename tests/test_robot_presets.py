@@ -847,7 +847,7 @@ class UnitreeG1ServingTest(unittest.TestCase):
         self.assertEqual(actions.shape, (HORIZON, G1_ROBOT_DIM))
 
         # Cameras land in declared slot order, resized to the model edge.
-        stacked = self.policy.model.images[0]
+        stacked = self.policy.model_runner.images[0]
         self.assertEqual(stacked.shape, (3, IMAGE_SIZE, IMAGE_SIZE, 3))
         for slot, fill in enumerate((10, 20, 30)):
             self.assertEqual(int(stacked[slot].max()), fill, f"slot {slot}")

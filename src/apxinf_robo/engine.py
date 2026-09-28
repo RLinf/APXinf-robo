@@ -112,13 +112,9 @@ def load_policy(model_dir, **kwargs):
     # Robo's --precision predates PI0.5's model_variant option. Preserve the
     # public CLI spelling while passing the family's actual loading contract.
     if "precision" in kwargs and "model_variant" not in kwargs:
-        import json
+        from apxinf.policies.auto import _read_model_type
 
-        model_type = kwargs.get("model_type")
-        if model_type is None:
-            config = pathlib.Path(model_dir) / "config.json"
-            document = json.loads(config.read_text()) if config.is_file() else {}
-            model_type = document.get("type", document.get("model_type", "pi05"))
+        model_type = kwargs.get("model_type") or _read_model_type(pathlib.Path(model_dir))
         if model_type == "pi05":
             kwargs["model_variant"] = _pi05_variant(kwargs.pop("precision"))
     return apxinf.AutoPolicy.from_pretrained(model_dir, **kwargs)
@@ -240,7 +236,11 @@ def load_random_model(**kwargs):
     """
     import apxinf_py  # lazy: only this path needs the CUDA binding at import time
 
-    if "precision" in kwargs and "model_variant" not in kwargs:
+    if (
+        kwargs.get("model", "pi05") == "pi05"
+        and "precision" in kwargs
+        and "model_variant" not in kwargs
+    ):
         kwargs["model_variant"] = _pi05_variant(kwargs.pop("precision"))
     return apxinf_py.ModelRunner.random(**kwargs)
 
