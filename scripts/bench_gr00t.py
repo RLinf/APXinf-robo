@@ -38,6 +38,8 @@ def parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.warmup < 0 or args.iterations < 1:
         parser.error("--warmup must be non-negative and --iterations must be positive")
+    if args.autotune and args.tactics is None:
+        parser.error("--autotune requires --tactics to name the generated database")
     return args
 
 
@@ -115,6 +117,8 @@ def main() -> None:
     model_dir = args.model_dir.resolve()
     output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
+    if args.autotune:
+        args.tactics.resolve().parent.mkdir(parents=True, exist_ok=True)
     runner = ROOT / "apxinf/scripts/bench_gr00t.py"
     if not runner.is_file():
         raise SystemExit("ApxInf submodule is missing; run git submodule update --init")
