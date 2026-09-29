@@ -48,7 +48,8 @@ outside the timed region. No input file or separate backbone path is needed:
 ```sh
 python scripts/bench_gr00t.py \
   --model-dir /models/GR00T-N1.7-LIBERO/libero_10 --precision bf16 \
-  --warmup 10 --iterations 50 \
+  --tactics devlocal/gr00t-eval/bf16-two-view-tactics.json --autotune \
+  --warmup 30 --iterations 200 \
   --output devlocal/gr00t-eval/latency.json
 ```
 
@@ -56,14 +57,26 @@ The report measures preprocessed host tensors through model-core action D2H,
 including steady-state CUDA Graph replay. The generated observation is synthetic,
 so its output is for latency testing, not task accuracy or numerical parity with
 the historical fixed-input run. On Thor, its two-view image grid, 156-token
-prompt, state shape, and output shape matched the original two-view input; the
-new and original inputs measured 58.69 ms and 58.38 ms P50 respectively with
-the same binary and 10 warmups plus 50 samples. The published table used a
-different recorded build and conditions, and also includes a one-view input. If
+prompt, state shape, and output shape matched the original two-view input.
+
+The table's Thor BF16 two-view result used a tuned tactics database, 30
+warmups, and 200 samples. `--autotune` creates a database for the local device
+and binary at the path given by `--tactics`; later runs keep `--tactics` and omit
+`--autotune`. Omitting both flags measures the provider's default GEMM tactics.
+
+With locked Thor clocks and fan, the generated two-view input measured 57.91 ms
+P50 without tactics and 54.10 ms with a compatible tuned database. The original
+fixed input measured 57.89 ms without tactics on the same binary; the table's
+54.216 ms was recorded with a different binary and tuned database. A newly
+autotuned database measured 54.55 ms P50 in a separate unlocked 10/50 run.
+The default LIBERO checkpoint supplies two camera views, so this command does
+not reproduce the table's one-view column. The CLI accepts BF16, FP8, and INT8;
+only Thor BF16 has been measured with this generated-input path. FP8 requires
+matching calibration, and INT8 is for supported Orin deployments. Tactics
+databases are specific to the workload, device, and binary. If
 `apxinf/target/release/examples/gr00t_bench` already exists, the script uses it
 without rebuilding; `--binary /path/to/gr00t_bench` selects another existing
-build. Otherwise Cargo builds the pinned runner. FP8 also needs a matching
-`--calibration` profile.
+build. Otherwise Cargo builds the pinned runner.
 
 ## Accuracy evaluation
 
