@@ -31,8 +31,10 @@ python scripts/bench_qwen_drive.py \
 
 The same command works in ApxInf. Robo delegates input construction and timing
 to the pinned engine while loading the policy through `apxinf_robo.load_policy`.
-No explicit tactics are required for the accepted operator-default path. If
-supplying `--tactics`, keep the database identity and hash in the run evidence.
+Without `--tactics`, the engine selects a compatible hardware/toolkit database
+under `configs/tuning` when available; otherwise it uses provider defaults.
+For controlled comparisons, supply `--tactics` and retain the database identity
+and hash in the run evidence.
 Lock CPU/GPU/EMC clocks and fan, exclude other compute jobs, and repeat the run
 with a second output path. Report the median of all retained samples.
 
