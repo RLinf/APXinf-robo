@@ -30,53 +30,54 @@ required files and processor environment.
 
 ## Performance
 
-Batch 1, best recorded model-core P50 from fixed processor tensors to returned
+Batch 1, model-core P50 from constructed host tensors to returned
 actions, following the [GR00T benchmark procedure](../apxinf/doc/gr00t-n1.7.md#fixed-input-benchmark):
 
 | Hardware | Precision | 1-view P50 | 2-view P50 |
 |---|---|---:|---:|
-| Jetson AGX Thor | BF16 | 51.834 ms | 54.216 ms |
-| Jetson AGX Thor | FP8 | 32.557 ms | 35.436 ms |
+| Jetson AGX Thor | BF16 | 51.39 ms | 53.77 ms |
+| Jetson AGX Thor | FP8 | 31.71 ms | 36.48 ms |
 | Jetson AGX Orin | BF16 | 75.778 ms | 84.864 ms |
 | Jetson AGX Orin | W8A8 | 56.711 ms | 64.924 ms |
 
-Run the same pinned model-core CUDA Graph benchmark from the Robo checkout.
-The script generates a deterministic two-view LIBERO observation, processes it
-once with the checkpoint's official NVIDIA processor, and keeps preprocessing
-outside the timed region. No input file or separate backbone path is needed:
+The benchmark constructs deterministic tensors in memory in the pinned engine.
+It needs the prepared model directory only; processor assets are discovered
+under `assets/cosmos`. It does not read images, saved tensors or a dataset.
+The model-core timing boundary and 90/156-token one/two-view shapes match the
+engine benchmark. Synthetic outputs are for latency, not task accuracy.
+
+Build once and run each view count for the selected hardware/precision:
 
 ```sh
-python scripts/bench_gr00t.py \
-  --model-dir /models/GR00T-N1.7-LIBERO/libero_10 --precision bf16 \
-  --tactics devlocal/gr00t-eval/bf16-two-view-tactics.json --autotune \
-  --warmup 30 --iterations 200 \
-  --output devlocal/gr00t-eval/latency.json
+cargo build --manifest-path apxinf/Cargo.toml --release \
+  -p apxinf-model --features cuda --example gr00t_bench
+for views in 1 2; do
+  python scripts/bench_gr00t.py \
+    --model-dir /models/GR00T-N1.7-LIBERO/libero_10 --precision bf16 \
+    --views "$views" --warmup 30 --samples 200 \
+    --binary apxinf/target/release/examples/gr00t_bench \
+    --tactics "devlocal/gr00t-eval/thor-bf16-${views}v-tactics.json" --autotune \
+    --out "devlocal/gr00t-eval/thor-bf16-${views}v.json"
+done
 ```
 
-The report measures preprocessed host tensors through model-core action D2H,
-including steady-state CUDA Graph replay. The generated observation is synthetic,
-so its output is for latency testing, not task accuracy or numerical parity with
-the historical fixed-input run. On Thor, its two-view image grid, 156-token
-prompt, state shape, and output shape matched the original two-view input.
+| Table row | Precision argument | Additional argument |
+|---|---|---|
+| Thor BF16 | `--precision bf16` | None |
+| Thor FP8 | `--precision fp8` | `--calibration /path/to/matching-calibration.json` |
+| Orin BF16 | `--precision bf16` | None |
+| Orin W8A8 | `--precision int8` | None |
 
-The table's Thor BF16 two-view result used a tuned tactics database, 30
-warmups, and 200 samples. `--autotune` creates a database for the local device
-and binary at the path given by `--tactics`; later runs keep `--tactics` and omit
-`--autotune`. Omitting both flags measures the provider's default GEMM tactics.
+Use separate paths for each hardware, precision and view count. The first run
+creates the tactic database; repeat with `--tactics` and omit `--autotune` to
+verify reuse. Lock clocks/fan and exclude other GPU jobs. CUDA/cuBLAS and kernel
+identities must match the database. Reports must say `cuda-graph`; retain the
+raw samples and artifact hashes. See the engine's
+[benchmark contract](../apxinf/doc/gr00t-n1.7.md#fixed-input-benchmark).
 
-With locked Thor clocks and fan, the generated two-view input measured 57.91 ms
-P50 without tactics and 54.10 ms with a compatible tuned database. The original
-fixed input measured 57.89 ms without tactics on the same binary; the table's
-54.216 ms was recorded with a different binary and tuned database. A newly
-autotuned database measured 54.55 ms P50 in a separate unlocked 10/50 run.
-The default LIBERO checkpoint supplies two camera views, so this command does
-not reproduce the table's one-view column. The CLI accepts BF16, FP8, and INT8;
-only Thor BF16 has been measured with this generated-input path. FP8 requires
-matching calibration, and INT8 is for supported Orin deployments. Tactics
-databases are specific to the workload, device, and binary. If
-`apxinf/target/release/examples/gr00t_bench` already exists, the script uses it
-without rebuilding; `--binary /path/to/gr00t_bench` selects another existing
-build. Otherwise Cargo builds the pinned runner.
+Thor rows were measured on 2026-09-29 with this workload and reused tactics.
+Orin rows remain historical pending hardware availability. See the engine
+document for clocks, sample counts and timing boundaries.
 
 ## Accuracy evaluation
 
@@ -104,3 +105,8 @@ For a service deployment, use `apxinf-robo serve --robot franka_libero
 --model-dir /models/GR00T-N1.7-LIBERO/libero_10 --precision bf16`, then select
 `--backend websocket` in the evaluator. See the [observation and gripper
 contract](../examples/README.md#gr00t-n17-on-libero).
+
+Run the accuracy command for each precision/hardware row above, adding the
+matching FP8 calibration when needed. Use independent result paths for every
+run. Accuracy always uses simulator observations through Robo's shared
+`eval-libero` entry, as PI0.5 does.

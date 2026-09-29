@@ -205,14 +205,13 @@ apxinf-robo eval-libero --backend in-process \
 
 Qwen-Drive produces a driving trajectory, not LIBERO robot actions. Use Robo's
 model-agnostic `load_policy` entry point with the released checkpoint and its
-planner. The executable example consumes the scene fixture format described in
-the [ApxInf benchmark guide](../apxinf/doc/qwen-drive-benchmark.md):
+planner. Run the constructed-input benchmark without scene files:
 
 ```sh
-python examples/qwen_drive_infer.py \
-  --model-dir /models/Qwen-Drive-1.0-4B \
-  --inputs /path/to/public-inputs
+python scripts/bench_qwen_drive.py --model-dir /models/Qwen-Drive-1.0-4B
 ```
+
+Use [the Qwen-Drive guide](../doc/qwen-drive.md) for real-data NAVSIM evaluation.
 
 To serve the same planning policy over Robo's OpenPI-compatible WebSocket
 transport, omit the robot preset and supply its planner:
