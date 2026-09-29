@@ -479,6 +479,7 @@ def run_episode(
     warm_start_alpha: float,
     replan_steps: int = REPLAN_STEPS,
     settle_gripper: float = -1.0,
+    max_steps: int | None = None,
 ) -> dict:
     model_type = getattr(backend, "model_type", "pi05")
     episode_started = time.perf_counter()
@@ -511,7 +512,7 @@ def run_episode(
     warm_noise_checksum = None
     rng = np.random.default_rng(seed + 1_000_003 * task_id + 10_007 * trial_id)
 
-    while action_steps < MAX_STEPS:
+    while action_steps < (MAX_STEPS if max_steps is None else max_steps):
         if not action_plan:
             preprocess_started = time.perf_counter()
             images = libero_images(
@@ -639,6 +640,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="'all' (default) or a comma list of task ids, applied within each selected suite",
     )
     parser.add_argument("--trials-per-task", type=int, default=10)
+    parser.add_argument("--max-steps", type=int, default=MAX_STEPS)
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument(
         "--model-seed",
@@ -780,6 +782,8 @@ def parse_args(argv=None) -> argparse.Namespace:
             )
     if args.replan_steps <= 0:
         parser.error("--replan-steps must be positive")
+    if args.max_steps <= 0:
+        parser.error("--max-steps must be positive")
     if args.trials_per_task <= 0 or args.trials_per_task > 50:
         parser.error("--trials-per-task must be in 1..=50")
     return args
@@ -876,6 +880,7 @@ def main(argv=None) -> None:
                                     args.warm_start_alpha,
                                     args.replan_steps,
                                     args.settle_gripper,
+                                    args.max_steps,
                                 )
                                 record["attempt"] = attempt
                                 record["precision"] = args.precision

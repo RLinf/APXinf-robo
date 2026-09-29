@@ -1,13 +1,15 @@
 # GR00T N1.7 on LIBERO
 
-Install APXinf-robo with its LIBERO dependencies, the ApxInf CUDA binding, and
+Install APXinf-robo with its LIBERO dependencies, the LIBERO simulator, the
+ApxInf CUDA binding, and
 the matching Isaac-GR00T/Transformers processor environment. Prepare the
 checkpoint's local Cosmos processor resources as described in the
 [ApxInf loading guide](../apxinf/doc/gr00t-n1.7.md#loading).
 
 ## Performance
 
-Batch 1, best recorded P50:
+Batch 1, best recorded model-core P50 from fixed processor tensors to returned
+actions, following the [GR00T benchmark procedure](../apxinf/doc/gr00t-n1.7.md#fixed-input-benchmark):
 
 | Hardware | Precision | 1-view P50 | 2-view P50 |
 |---|---|---:|---:|
@@ -16,16 +18,18 @@ Batch 1, best recorded P50:
 | Jetson AGX Orin | BF16 | 75.778 ms | 84.864 ms |
 | Jetson AGX Orin | W8A8 | 56.711 ms | 64.924 ms |
 
-Measure Robo's full policy request latency using `per_call_ms` in the LIBERO
-summary:
+Benchmark full two-view policy requests through Robo's L2 loader. The script
+captures one LIBERO-10 task-0 observation before timing and holds it fixed:
 
 ```sh
-apxinf-robo eval-libero --backend in-process \
+python scripts/bench_libero_policy.py \
   --model-dir /models/GR00T-N1.7-LIBERO/libero_10 --precision bf16 \
-  --suite libero_10 --tasks 0 --trials-per-task 1 \
-  --results-jsonl devlocal/gr00t-eval/results.jsonl \
-  --summary-json devlocal/gr00t-eval/summary.json
+  --suite libero_10 --task-id 0 \
+  --warmup 10 --samples 30 \
+  --out devlocal/gr00t-eval/latency.json
 ```
+
+The JSON reports Robo request P50/P95, including preprocessing and action decoding.
 
 ## Accuracy evaluation
 
@@ -44,6 +48,7 @@ Run the full suite with Robo's GR00T state and action conversion:
 apxinf-robo eval-libero --backend in-process \
   --model-dir /models/GR00T-N1.7-LIBERO/libero_10 --precision bf16 \
   --suite libero_10 --trials-per-task 10 --seed 7 \
+  --max-steps 720 --replan-steps 8 \
   --results-jsonl devlocal/gr00t-eval/full-results.jsonl \
   --summary-json devlocal/gr00t-eval/full-summary.json
 ```

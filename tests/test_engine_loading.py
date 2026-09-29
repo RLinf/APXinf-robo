@@ -1,4 +1,4 @@
-"""Cross-repository loader contract for the PR #94 engine pin."""
+"""Cross-repository loader contracts for the pinned engine."""
 
 import json
 from types import SimpleNamespace
