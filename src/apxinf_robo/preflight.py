@@ -35,6 +35,43 @@ from apxinf.checkpoints.preflight import (
 
 from .embodiments.base import RobotPreset, get_robot_preset
 
+_PI0_FAST_TYPES = frozenset(("pi0_fast", "pi0fast"))
+_GR00T_TYPES = frozenset(("gr00t", "gr00tn1d7", "Gr00tN1d7"))
+
+
+def _registered_policy_report(
+    model_dir: Path, preset: RobotPreset, model_type: str, image_keys: Sequence[str]
+) -> Tuple[CheckpointReport, Tuple[Finding, ...]]:
+    """Check cheap disk facts; the concrete policy validates its own assets on load."""
+    if model_type == "qwen_drive":
+        findings = [Finding(FAIL, "robot preset", "Qwen-Drive is a driving planner",
+                            "load or serve it without a LIBERO robot preset")]
+    else:
+        required = (
+            "model.safetensors",
+            "policy_preprocessor_step_2_normalizer_processor.safetensors",
+            "policy_postprocessor_step_0_unnormalizer_processor.safetensors",
+        ) if model_type in _PI0_FAST_TYPES else ("assets/cosmos/apxinf_assets.json",)
+        findings = []
+        for name in required:
+            present = (model_dir / name).is_file()
+            findings.append(Finding(
+                INFO if present else FAIL, name, "present" if present else "missing",
+                "" if present else "prepare the complete checkpoint before loading",
+            ))
+        if model_type in _GR00T_TYPES and not any(
+            (model_dir / name).is_file() for name in
+            ("model.safetensors", "model.safetensors.index.json")
+        ):
+            findings.append(Finding(FAIL, "model weights", "missing",
+                                    "supply the GR00T weights and index"))
+        findings.extend(_check_cameras(preset, image_keys))
+        findings.append(Finding(WARN, "policy resources",
+                                "model-specific tokenizer and processor checks run at load time",
+                                "load the policy to validate all resources"))
+    report = CheckpointReport(tuple(findings), None, {}, None, None)
+    return report, sort_findings(findings)
+
 __all__ = [
     "FAIL",
     "WARN",
@@ -202,6 +239,13 @@ def inspect_for_robot(
     preset = get_robot_preset(robot)
     discrete = preset.discrete_state if discrete_state is None else bool(discrete_state)
     keys = preset.image_keys if image_keys is None else tuple(image_keys)
+
+    if (model_dir / "config.json").is_file():
+        from apxinf.policies.auto import _read_model_type
+
+        model_type = _read_model_type(model_dir)
+        if model_type in _PI0_FAST_TYPES | _GR00T_TYPES | {"qwen_drive"}:
+            return _registered_policy_report(model_dir, preset, model_type, keys)
 
     # Only inspect the statistics this deployment will actually read. A server
     # that drops proprioception asks about no state key at all, so no state

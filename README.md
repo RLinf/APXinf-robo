@@ -130,7 +130,7 @@ Two views, 224x224 NHWC `uint8`, batch 1.
 | Jetson AGX Orin | BF16 | 117.3 ms | 25.34 ms |
 | RTX 4090 | BF16 | 20.9 ms | 5.24 ms |
 
-[Robo-side LIBERO integration](examples/README.md#pi0-fast-on-libero).
+[Benchmark and LIBERO evaluation](doc/pi0-fast.md).
 
 ### GR00T N1.7
 
@@ -143,7 +143,7 @@ One or two views, batch 1. Best recorded P50.
 | Jetson AGX Orin | BF16 | 75.778 ms | 84.864 ms |
 | Jetson AGX Orin | W8A8 | 56.711 ms | 64.924 ms |
 
-[Robo-side LIBERO integration](examples/README.md#gr00t-n17-on-libero).
+[Benchmark and LIBERO evaluation](doc/gr00t-n1.7.md).
 
 ### Qwen-Drive
 
@@ -154,7 +154,7 @@ decoded images to host trajectory.
 |---|---|---:|
 | Jetson AGX Thor | BF16 | 482.60 ms |
 
-[Test setup and results](https://github.com/infinigence/ApxInf/blob/7f37642dd6c5896bca66d7640d9944c2a3fe04b4/doc/qwen-drive-benchmark.md).
+[Benchmark and trajectory evaluation](doc/qwen-drive.md).
 
 
 ## Port a new model with an agent

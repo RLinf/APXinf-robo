@@ -1,7 +1,7 @@
 """``apxinf-robo serve`` -- an OpenPI-compatible WebSocket policy server.
 
 All reusable logic lives in libraries: the transport in :mod:`apxinf.serving`,
-the policy in ApxInf (``AutoPolicy`` / ``Pi05Policy``), and the per-embodiment
+the policy in ApxInf, and the per-embodiment
 wire contract in :mod:`apxinf_robo.presets`. This file is argument parsing and
 wiring -- load an **in-process** policy through the ``apxinf_py`` PyO3 binding
 and serve it.
@@ -14,10 +14,9 @@ differ and a mismatch degrades silently rather than failing. ``--image-keys`` /
 ``--state-key`` override individual fields for a client that already speaks a
 fixed dialect.
 
-**State:** each preset decides whether ``state`` is injected (discretized into
-the prompt, normalized to [-1, 1] from ``norm_stats``) or dropped --
-``--discrete-state`` / ``--no-discrete-state`` override it. ``franka_libero``
-drops state; a joint-space robot needs it.
+**State:** the concrete policy owns state encoding. PI0.5 can drop or discretize
+it using ``--discrete-state``; PI0-FAST and GR00T use their own state contracts.
+``--robot none`` serves a policy such as Qwen-Drive without a robot preset.
 
 **Images are RGB.** Neither this server nor openpi converts colour: an
 ``H x W x 3`` uint8 array is taken as RGB as-is. A client reading frames with
@@ -28,6 +27,7 @@ here (aspect-preserving pad to the model's edge), so any resolution is fine.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import pathlib
 
@@ -35,6 +35,7 @@ from apxinf.checkpoints import FORMATS as CHECKPOINT_FORMATS
 
 from ..embodiments.base import ROBOT_PRESETS, available_robots, get_robot_preset
 from ..engine import (
+    load_policy,
     load_random_model,
     policy_from_random,
     resolve_tactics,
@@ -44,6 +45,16 @@ from ..preflight import FAIL, WARN, check_checkpoint, format_findings
 from ..presets import build_robot_policy
 
 DEFAULT_ROBOT = "franka_libero"
+
+
+def _json_options(value: str) -> dict:
+    try:
+        options = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise argparse.ArgumentTypeError(f"invalid policy options: {error.msg}") from error
+    if not isinstance(options, dict):
+        raise argparse.ArgumentTypeError("--policy-options must be a JSON object")
+    return options
 
 
 def _split_keys(value: str) -> tuple:
@@ -62,7 +73,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument("--model-dir", type=pathlib.Path, help="checkpoint directory")
     parser.add_argument(
         "--robot",
-        choices=available_robots(include_aliases=True),
+        choices=(*available_robots(include_aliases=True), "none"),
         default=DEFAULT_ROBOT,
         help="embodiment preset: wire keys + robot pre/post steps + action width "
         f"(default: {DEFAULT_ROBOT}). openpi's --policy.config equivalent; a "
@@ -105,7 +116,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--tokenizer",
         type=pathlib.Path,
-        help="SentencePiece model (auto-detected under MODEL_DIR, or APXINF_TOKENIZER)",
+        help="text tokenizer override (PI0-FAST also needs its FAST action tokenizer)",
     )
     parser.add_argument(
         "--ckpt-format",
@@ -131,6 +142,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         "processor state uses LeRobot-compatible identity transforms.",
     )
     parser.add_argument("--device", default="cuda:0")
+    parser.add_argument(
+        "--policy-options", type=_json_options, default={},
+        help="model-specific loader options as JSON; for example Qwen-Drive planner/mode",
+    )
     parser.add_argument("--precision", choices=("auto", "fp8", "bf16", "int8"), default="bf16")
     parser.add_argument(
         "--calibration",
@@ -205,7 +220,7 @@ def build_parser() -> argparse.ArgumentParser:
     robot_help = "\n".join(f"  {p.describe()}" for p in ROBOT_PRESETS.values())
     parser = argparse.ArgumentParser(
         prog="apxinf-robo serve",
-        description="Serve an ApxInf PI0.5 policy through OpenPI's websocket API "
+        description="Serve an ApxInf policy through OpenPI's websocket API "
         "(in-process; no subprocess)",
         epilog=f"robot presets (--robot):\n{robot_help}",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -223,6 +238,18 @@ def run(args: argparse.Namespace) -> None:
         raise ValueError("pass --model-dir, or --random-weights for a checkpoint-free engine")
     if args.random_weights and args.model_dir is not None:
         raise ValueError("--random-weights is checkpoint-free; do not also pass --model-dir")
+
+    if not args.random_weights:
+        from apxinf.policies.auto import _read_model_type
+
+        model_type = args.model_type or _read_model_type(args.model_dir)
+        if model_type != "pi05":
+            _serve_registered_policy(args, model_type)
+            return
+        if args.robot == "none":
+            raise ValueError("PI0.5 serving requires a robot preset")
+        if args.policy_options:
+            raise ValueError("--policy-options is supported by registered non-PI0.5 policies")
 
     preset = get_robot_preset(args.robot)
     image_keys = args.image_keys if args.image_keys is not None else preset.image_keys
@@ -391,6 +418,45 @@ def run(args: argparse.Namespace) -> None:
     server = websocket_server(policy, args.host, args.port)
     try:
         server.serve_forever()
+    except KeyboardInterrupt:
+        logging.info("shutting down")
+    finally:
+        policy.close()
+
+
+def _serve_registered_policy(args: argparse.Namespace, model_type: str) -> None:
+    """Serve a policy using its own loader contract instead of PI0.5 CLI defaults."""
+    options = dict(args.policy_options)
+    explicit = {
+        "calibration": args.calibration,
+        "tactics": args.tactics,
+        "action_horizon": args.action_horizon,
+        "tokenizer_path": args.tokenizer,
+        "checkpoint": args.checkpoint,
+        "num_views": args.num_views,
+        "discrete_state": args.discrete_state,
+        "norm_stats": args.norm_stats,
+        "image_keys": args.image_keys,
+        "state_key": args.state_key,
+        "action_dim": args.action_dim,
+    }
+    options.update((key, value) for key, value in explicit.items() if value is not None)
+    if args.norm_key != "actions":
+        options["norm_key"] = args.norm_key
+    if args.autotune:
+        options["autotune"] = True
+    options.update(model_type=model_type, device=args.device, precision=args.precision)
+    if args.robot == "none":
+        policy = load_policy(args.model_dir, **options)
+    else:
+        if model_type == "qwen_drive":
+            raise ValueError("Qwen-Drive has no LIBERO robot preset; pass --robot none")
+        options["metadata"] = {**options.get("metadata", {}), "model_type": model_type}
+        policy = build_robot_policy(args.robot, args.model_dir, **options)
+    try:
+        logging.info("serving model=%s H=%d x D=%d", model_type,
+                     policy.action_horizon, policy.action_dim)
+        websocket_server(policy, args.host, args.port).serve_forever()
     except KeyboardInterrupt:
         logging.info("shutting down")
     finally:

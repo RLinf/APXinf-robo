@@ -105,18 +105,24 @@ def require_apxinf():
 def load_policy(model_dir, **kwargs):
     """L2: dispatch ``model_dir`` to its concrete policy.
 
-    ``kwargs`` reach the concrete policy. Robo's legacy ``precision`` maps to
-    PI0.5's ``model_variant``; other families retain their own loading options.
+    ``kwargs`` reach the concrete policy. Robo's public ``precision`` maps to
+    ``model_variant`` for families that use that spelling.
     """
     apxinf = require_apxinf()
     # Robo's --precision predates PI0.5's model_variant option. Preserve the
     # public CLI spelling while passing the family's actual loading contract.
-    if "precision" in kwargs and "model_variant" not in kwargs:
+    if "precision" in kwargs:
         from apxinf.policies.auto import _read_model_type
 
         model_type = kwargs.get("model_type") or _read_model_type(pathlib.Path(model_dir))
+        precision = kwargs.pop("precision")
         if model_type == "pi05":
-            kwargs["model_variant"] = _pi05_variant(kwargs.pop("precision"))
+            if "model_variant" not in kwargs:
+                kwargs["model_variant"] = _pi05_variant(precision)
+        elif model_type == "qwen_drive":
+            kwargs.setdefault("model_variant", precision)
+        else:
+            kwargs["precision"] = precision
     return apxinf.AutoPolicy.from_pretrained(model_dir, **kwargs)
 
 
@@ -182,11 +188,12 @@ def load_bare_model(
                 kwargs["tactics"] = str(tactics)
     elif kwargs["tactics"] is None:
         del kwargs["tactics"]
-    option = (
-        {"model_variant": _pi05_variant(precision)}
-        if model == "pi05"
-        else {"precision": precision}
-    )
+    if model == "pi05":
+        option = {"model_variant": _pi05_variant(precision)}
+    elif model == "qwen_drive":
+        option = {"model_variant": precision}
+    else:
+        option = {"precision": precision}
     return apxinf.ModelRunner.load(model, str(model_dir), device=device, **option, **kwargs)
 
 

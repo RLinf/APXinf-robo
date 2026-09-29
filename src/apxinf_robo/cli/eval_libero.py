@@ -21,9 +21,10 @@ resize remains inside the selected policy.
 key is ``(suite, task_id, trial_id)`` so multiple suites share one resumable
 account without ``task_id=0`` colliding across suites.
 
-Adding a new model needs no change here: register a policy in ``apxinf.policies``
-(``@register_policy("<name>")``) and run ``--backend in-process --model-type
-<name> --model-dir <ckpt>`` (or serve it and use ``--backend websocket``).
+The evaluator selects the LIBERO state and action conversion from the model type.
+PI0.5 keeps its seven-value state; PI0-FAST preserves both finger joints; GR00T
+uses named state and converts its decoded gripper before ``env.step``. A new
+family needs a LIBERO conversion only when its contract differs from these.
 
     # websocket (server already running)
     apxinf-robo eval-libero --backend websocket --precision bf16 \
@@ -50,7 +51,13 @@ from typing import Optional, Protocol, Tuple
 
 import numpy as np
 
-from ..envs.libero import libero_images, libero_state, make_env
+from ..envs.libero import (
+    libero_gr00t_action,
+    libero_gr00t_state,
+    libero_images,
+    libero_state,
+    make_env,
+)
 
 # --- rollout protocol constants (OpenPI's public PI0.5 LIBERO configuration) ---
 LIBERO_ACTION_DIM = 7
@@ -65,6 +72,20 @@ LIBERO_PRESET = "franka_libero"
 MAX_STEPS = 520
 WAIT_STEPS = 10
 REPLAN_STEPS = 5
+
+
+def _two_finger_state(observation):
+    return libero_state(observation, finger_joints=2)
+
+
+_LIBERO_STATES = {
+    "pi0_fast": _two_finger_state,
+    "pi0fast": _two_finger_state,
+    "gr00t": libero_gr00t_state,
+    "gr00tn1d7": libero_gr00t_state,
+    "Gr00tN1d7": libero_gr00t_state,
+}
+_GR00T_TYPES = frozenset(("gr00t", "gr00tn1d7", "Gr00tN1d7"))
 
 #: The five LIBERO task suites ``--suite all`` expands to, in a stable order.
 ALL_SUITES = (
@@ -251,6 +272,7 @@ class Backend(Protocol):
 
     #: Static description sent by / read from the underlying policy.
     metadata: dict
+    model_type: str
 
     def infer(
         self,
@@ -319,6 +341,7 @@ class WebsocketBackend:
             os.environ[variable] = ",".join(entries)
         self._client = websocket_client_policy.WebsocketClientPolicy(host, port)
         self.metadata = self._client.get_server_metadata()
+        self.model_type = self.metadata.get("model_type", "pi05")
         actual_precision = self.metadata.get("precision")
         if actual_precision != expected_precision:
             self.close()
@@ -374,6 +397,11 @@ class InProcessBackend:
         # Lazy: loading the engine pulls in the policy stack; websocket-only
         # users never pay for it.
         from ..engine import load_policy
+        from apxinf.policies.auto import _read_model_type
+
+        self.model_type = args.model_type or _read_model_type(args.model_dir)
+        if self.model_type == "qwen_drive":
+            raise ValueError("Qwen-Drive is a driving planner, not a LIBERO robot policy")
 
         options = {
             "checkpoint": args.checkpoint,
@@ -403,7 +431,7 @@ class InProcessBackend:
             image_keys=convention.image_keys,
             state_key=convention.state_key,
             prompt_key=convention.prompt_key,
-            metadata={"precision": args.precision, "policy": "libero"},
+            metadata={"precision": args.precision, "policy": "libero", "model_type": self.model_type},
             **{name: value for name, value in options.items() if value is not None},
         )
         self.metadata = dict(getattr(self._policy, "metadata", {}))
@@ -452,6 +480,7 @@ def run_episode(
     replan_steps: int = REPLAN_STEPS,
     settle_gripper: float = -1.0,
 ) -> dict:
+    model_type = getattr(backend, "model_type", "pi05")
     episode_started = time.perf_counter()
     env.reset()
     observation = env.set_init_state(initial_state)
@@ -489,7 +518,7 @@ def run_episode(
                 observation["agentview_image"],
                 observation["robot0_eye_in_hand_image"],
             )
-            state = libero_state(observation)
+            state = _LIBERO_STATES.get(model_type, libero_state)(observation)
             preprocess_seconds += time.perf_counter() - preprocess_started
 
             noise = None
@@ -512,6 +541,8 @@ def run_episode(
             actions, normalized_actions, timing = backend.infer(
                 images[0], images[1], state, prompt, noise=noise
             )
+            if model_type in _GR00T_TYPES:
+                actions = libero_gr00t_action(actions)
             round_trip_seconds = time.perf_counter() - request_started
             inference_seconds += round_trip_seconds
             # The action horizon is a checkpoint property (metadata ``action_horizon``),
@@ -641,7 +672,8 @@ def build_parser() -> argparse.ArgumentParser:
     in_process.add_argument("--device", default="cuda:0")
     in_process.add_argument("--calibration", type=pathlib.Path)
     in_process.add_argument("--tactics", type=pathlib.Path, help=argparse.SUPPRESS)
-    in_process.add_argument("--tokenizer", type=pathlib.Path)
+    in_process.add_argument("--tokenizer", type=pathlib.Path,
+                            help="text tokenizer override; PI0-FAST also needs APXINF_FAST_TOKENIZER")
     in_process.add_argument(
         "--norm-stats", type=pathlib.Path,
         help="explicit OpenPI-style norm_stats.json; overrides checkpoint normalization",
@@ -806,6 +838,9 @@ def main(argv=None) -> None:
     write_summary(args.summary_json, ledger, expected_keys, args.precision, transport)
 
     backend = build_backend(args)
+    if args.warm_start and backend.model_type != "pi05":
+        backend.close()
+        raise ValueError("--warm-start is currently defined for PI0.5 flow policies only")
     print(f"backend={args.backend} metadata={backend.metadata}", flush=True)
     try:
         for name, suite in suites.items():

@@ -16,6 +16,7 @@ Run commands from the APXinf-robo repository root after
 | [`g1_adapter_smoke.py`](g1_adapter_smoke.py) | L2 + preset | Verify G1 processing and action shapes. | GPU + 3-view checkpoint |
 | [PI0-FAST on LIBERO](#pi0-fast-on-libero) | L2 + preset | Keep both finger joints and use checkpoint-owned normalization. | GPU + PI0-FAST checkpoint/tokenizers |
 | [GR00T N1.7 on LIBERO](#gr00t-n17-on-libero) | L2 + environment conversion | Pass named state and convert the decoded gripper for robosuite. | GPU + prepared GR00T checkpoint/processor |
+| [Qwen-Drive planning](#qwen-drive-planning) | L2 | Run a driving scene through Robo without a robot preset. | GPU + Qwen-Drive checkpoint and scene inputs |
 
 To verify L1/L2 numerical parity with a compatible checkpoint:
 
@@ -70,6 +71,9 @@ python examples/g1_adapter_smoke.py --model-dir /path/to/checkpoint
 Pass `--robot` to check your target preset; omitting it checks all presets.
 This checks checkpoint/robot compatibility. Verify GPU execution by running
 `robot_policy_infer.py`; `g1_adapter_smoke.py` additionally asserts G1 action shapes.
+For PI0-FAST and GR00T, preflight checks local required files and reports WARN
+because their tokenizer and processor resources are fully validated at policy
+load time.
 
 ## The checkpoint
 
@@ -128,6 +132,16 @@ instruction. `actions` is the detokenized, unnormalized action chunk; the
 policy also returns `action_tokens` for inspection. Replace the synthetic
 command with real observations before measuring task success.
 
+The same checkpoint can be served or evaluated through Robo's commands. Supply
+the tokenizer environment variables above to either process:
+
+```sh
+apxinf-robo serve --robot franka_libero --model-dir /models/pi0fast-libero-v044 --precision bf16
+apxinf-robo eval-libero --backend in-process --model-dir /models/pi0fast-libero-v044 \
+  --precision bf16 --suite libero_10 --tasks 0 --trials-per-task 1 \
+  --results-jsonl pi0fast-results.jsonl --summary-json pi0fast-summary.json
+```
+
 ## GR00T N1.7 on LIBERO
 
 First [prepare the checkpoint's local Cosmos processor resources](../apxinf/doc/gr00t-n1.7.md#loading)
@@ -175,3 +189,40 @@ simulator observation and instruction described above. The generic
 conversion; use the code above
 for simulator integration. FP8 additionally needs a matching `calibration=`
 profile, as described in the engine's GR00T guide.
+
+The prepared checkpoint also works with Robo's service and LIBERO evaluator:
+
+```sh
+apxinf-robo serve --robot franka_libero \
+  --model-dir /models/GR00T-N1.7-LIBERO/libero_10 --precision bf16
+apxinf-robo eval-libero --backend in-process \
+  --model-dir /models/GR00T-N1.7-LIBERO/libero_10 \
+  --precision bf16 --suite libero_10 --tasks 0 --trials-per-task 1 \
+  --results-jsonl gr00t-results.jsonl --summary-json gr00t-summary.json
+```
+
+## Qwen-Drive planning
+
+Qwen-Drive produces a driving trajectory, not LIBERO robot actions. Use Robo's
+model-agnostic `load_policy` entry point with the released checkpoint and its
+planner. The executable example consumes the scene fixture format described in
+the [ApxInf benchmark guide](../apxinf/doc/qwen-drive-benchmark.md):
+
+```sh
+python examples/qwen_drive_infer.py \
+  --model-dir /models/Qwen-Drive-1.0-4B \
+  --inputs /path/to/public-inputs
+```
+
+To serve the same planning policy over Robo's OpenPI-compatible WebSocket
+transport, omit the robot preset and supply its planner:
+
+```sh
+apxinf-robo serve --robot none --model-dir /models/Qwen-Drive-1.0-4B \
+  --precision bf16 \
+  --policy-options '{"planner":"/models/Qwen-Drive-1.0-4B/planner-sft","mode":"direct_planning"}'
+```
+
+Clients send the scene's `views` and prompt fields; the response contains a
+`(50, 3)` trajectory in `actions`. `eval-libero` applies only to LIBERO robot
+policies and rejects Qwen-Drive.

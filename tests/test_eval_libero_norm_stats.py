@@ -45,6 +45,7 @@ def test_explicit_norm_stats_reaches_checkpoint_loader(monkeypatch, tmp_path):
 
 
 def test_omitted_norm_stats_preserves_checkpoint_defaults(monkeypatch, tmp_path):
+    (tmp_path / "config.json").write_text(json.dumps({"type": "pi05"}))
     options = {}
 
     def load(model_dir, **kwargs):
@@ -58,6 +59,7 @@ def test_omitted_norm_stats_preserves_checkpoint_defaults(monkeypatch, tmp_path)
 
 def test_libero_wire_keys_come_from_the_preset(monkeypatch, tmp_path):
     """The evaluator must not become a second definition of "LIBERO keys"."""
+    (tmp_path / "config.json").write_text(json.dumps({"type": "pi05"}))
     options = {}
 
     def load(model_dir, **kwargs):

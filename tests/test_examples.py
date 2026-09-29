@@ -198,6 +198,7 @@ class ExampleSurfaceTest(_IsolatedRegistries):
         "g1_adapter_smoke",
         "policy_infer",
         "preflight_check",
+        "qwen_drive_infer",
         "register_preset",
         "robot_policy_infer",
         "serve_websocket",
@@ -233,6 +234,7 @@ class ExampleSurfaceTest(_IsolatedRegistries):
             "g1_adapter_smoke",
             "policy_infer",
             "preflight_check",
+            "qwen_drive_infer",
             "robot_policy_infer",
             "serve_websocket",
         )
