@@ -30,13 +30,13 @@ required files and processor environment.
 
 ## Performance
 
-Batch 1, model-core P50 from constructed host tensors to returned
+Batch 1, best recorded model-core P50 from fixed processor tensors to returned
 actions, following the [GR00T benchmark procedure](../apxinf/doc/gr00t-n1.7.md#fixed-input-benchmark):
 
 | Hardware | Precision | 1-view P50 | 2-view P50 |
 |---|---|---:|---:|
-| Jetson AGX Thor | BF16 | 51.39 ms | 53.77 ms |
-| Jetson AGX Thor | FP8 | 31.71 ms | 36.48 ms |
+| Jetson AGX Thor | BF16 | 51.834 ms | 54.216 ms |
+| Jetson AGX Thor | FP8 | 32.557 ms | 35.436 ms |
 | Jetson AGX Orin | BF16 | 75.778 ms | 84.864 ms |
 | Jetson AGX Orin | W8A8 | 56.711 ms | 64.924 ms |
 
@@ -75,9 +75,8 @@ identities must match the database. Reports must say `cuda-graph`; retain the
 raw samples and artifact hashes. See the engine's
 [benchmark contract](../apxinf/doc/gr00t-n1.7.md#fixed-input-benchmark).
 
-Thor rows were measured on 2026-09-29 with this workload and reused tactics.
-Orin rows remain historical pending hardware availability. See the engine
-document for clocks, sample counts and timing boundaries.
+The table retains the previously published results. Use the command above for
+new measurements. See the engine document for timing boundaries.
 
 ## Accuracy evaluation
 

@@ -9,6 +9,13 @@ into native inference. Scoring can use a separate CPU environment.
 
 ## Performance
 
+Direct planning, batch 1, ten flow steps, twelve input frames. Request P50
+includes decoded-image preprocessing and the host trajectory.
+
+| Hardware | Precision | Latency | NAVSIM PDM (242 scenes) |
+|---|---|---:|---:|
+| Jetson AGX Thor | BF16 | 482.60 ms | 85.6786 |
+
 The shared benchmark constructs three cameras with four frames each, 16 history
 states, and deterministic noise. It measures resident decoded RGB through the
 policy and the returned `[50, 3]` host trajectory. No recorded input files are
@@ -29,10 +36,8 @@ supplying `--tactics`, keep the database identity and hash in the run evidence.
 Lock CPU/GPU/EMC clocks and fan, exclude other compute jobs, and repeat the run
 with a second output path. Report the median of all retained samples.
 
-Constructed-input Thor BF16 latency measured on 2026-09-29 is **487.60 ms P50 /
-492.93 ms P95**, pooled over two runs of 30 requests. Both runs returned
-identical trajectories. CPU/GPU/EMC were locked to 2.601/1.575/4.266 GHz and
-fan PWM 255. The previous recorded-input latency was 482.60 ms.
+The table retains the previously published recorded-input result. Use the
+command above for new measurements.
 
 ## Accuracy evaluation
 

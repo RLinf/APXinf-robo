@@ -29,13 +29,13 @@ the same constructed input with verified token stopping points, as in the [PI0-F
 
 | Hardware | Precision | Prefix | Per Token |
 |---|---|---:|---:|
-| Jetson AGX Thor | BF16 | 29.24 ms | 17.39 ms |
-| Jetson AGX Thor | FP8 | 30.37 ms | 10.13 ms |
+| Jetson AGX Thor | BF16 | 33.1 ms | 17.16 ms |
+| Jetson AGX Thor | FP8 | 31.0 ms | 9.68 ms |
 | Jetson AGX Orin | BF16 | 117.3 ms | 25.34 ms |
 | RTX 4090 | BF16 | 20.9 ms | 5.24 ms |
 
-Thor rows were remeasured on 2026-09-29 with constructed input and freshly
-tuned tactics reused; Orin and RTX 4090 rows are historical pending a rerun.
+The table retains the previously published results. Use the command below for
+new measurements on each hardware and precision.
 
 The benchmark uses deterministic constructed camera images and state. It calls
 the pinned engine benchmark through Robo's policy loader and requires no frame
