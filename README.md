@@ -147,9 +147,14 @@ One or two views, batch 1. Best recorded P50.
 
 ### Qwen-Drive
 
-Jetson AGX Thor SM110, BF16 direct planning, batch 1, 10 flow steps and 12 input
-frames: request P50 **482.60 ms** from decoded images to host trajectory.
-[Test setup and results](https://github.com/infinigence/ApxInf/blob/7ea8fb1e0bffac3e6410ee18be74054e6d6411c2/doc/qwen-drive-benchmark.md).
+Direct planning, batch 1, 10 flow steps and 12 input frames. Request P50 from
+decoded images to host trajectory.
+
+| Hardware | Precision | Latency |
+|---|---|---:|
+| Jetson AGX Thor | BF16 | 482.60 ms |
+
+[Test setup and results](https://github.com/infinigence/ApxInf/blob/7f37642dd6c5896bca66d7640d9944c2a3fe04b4/doc/qwen-drive-benchmark.md).
 
 
 ## Port a new model with an agent

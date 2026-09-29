@@ -89,9 +89,12 @@ PI0-FAST still needs **both** mirrored finger joints in its eight-value state;
 the seven-value PI0.5 evaluation default would change its prompt. The policy
 reads normalization statistics from its own LeRobot checkpoint, so do not pass
 `--norm-stats` or flow-step options. Its text and FAST tokenizers must be present
-at the checkpoint-declared local paths or in the local Hugging Face cache.
+at the checkpoint-declared local paths or in the local Hugging Face cache. Set
+these paths when the tokenizers are stored elsewhere:
 
 ```sh
+APXINF_PALIGEMMA_TOKENIZER=/models/paligemma-tokenizer \
+APXINF_FAST_TOKENIZER=/models/fast-tokenizer \
 python examples/robot_policy_infer.py \
   --robot franka_libero --model-dir /models/pi0fast-libero-v044 \
   --precision bf16
