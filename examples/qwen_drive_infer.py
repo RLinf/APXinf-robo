@@ -77,6 +77,7 @@ def main() -> None:
             "trajectory_shape": list(actions.shape),
             "request_p50_ms": float(np.median(durations)),
             "request_p95_ms": float(np.percentile(durations, 95)),
+            "samples_ms": durations,
             "samples": args.samples,
             "warmup": args.warmup,
         }

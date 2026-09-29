@@ -25,6 +25,9 @@ python examples/qwen_drive_infer.py \
   --out devlocal/qwen-drive-eval/latency.json
 ```
 
+For the pooled 60-request result, repeat with a second output path and take
+the median of both reports' `samples_ms` arrays.
+
 ## Accuracy evaluation
 
 The fixed NAVSIM subset has 242 scenes and a PDM score of 85.6786. Its
