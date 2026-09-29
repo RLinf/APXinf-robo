@@ -2,8 +2,14 @@
 
 Install APXinf-robo with its LIBERO dependencies, the LIBERO simulator, and the
 ApxInf CUDA binding.
-Use a PI0-FAST LIBERO checkpoint with its normalization assets. Make both text
-and action tokenizers available at the checkpoint paths, in the local cache, or
+Download the PI0-FAST LIBERO checkpoint, including its normalization assets:
+
+```sh
+pip install -U huggingface_hub
+hf download lerobot/pi0fast-libero-v044 --local-dir /models/pi0fast-libero-v044
+```
+
+Make both text and action tokenizers available at the checkpoint paths, in the local cache, or
 through these environment variables:
 
 ```sh
