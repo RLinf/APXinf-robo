@@ -26,13 +26,12 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--scene-index", type=int, default=0)
     parser.add_argument("--warmup", type=int, default=0)
     parser.add_argument("--samples", type=int, default=1)
-    parser.add_argument("--arms", type=int, default=1, help="repeat the warmup/sampling arm")
     parser.add_argument("--reference", type=Path, help="reference trajectory .npy for output comparison")
     parser.add_argument("--save-actions", type=Path, help="write the predicted trajectory .npy")
     parser.add_argument("--out", type=Path, help="write measured latency and comparison JSON")
     args = parser.parse_args(argv)
-    if args.warmup < 0 or args.samples <= 0 or args.arms <= 0:
-        parser.error("--warmup must be non-negative; --samples and --arms must be positive")
+    if args.warmup < 0 or args.samples <= 0:
+        parser.error("--warmup must be non-negative and --samples must be positive")
     return args
 
 
@@ -57,24 +56,19 @@ def main() -> None:
         planner=args.planner or args.model_dir / "planner-sft",
     )
     try:
+        for _ in range(args.warmup):
+            policy.infer(observation, noise=noise)
         durations = []
-        arm_p50 = []
         first_actions = None
-        for _ in range(args.arms):
-            for _ in range(args.warmup):
-                policy.infer(observation, noise=noise)
-            arm_durations = []
-            for _ in range(args.samples):
-                start = time.perf_counter()
-                result = policy.infer(observation, noise=noise)
-                arm_durations.append((time.perf_counter() - start) * 1000)
-                actions = np.asarray(result["actions"])
-                if first_actions is None:
-                    first_actions = actions.copy()
-                elif not np.array_equal(first_actions, actions):
-                    raise ValueError("fixed Qwen-Drive input produced different trajectories")
-            durations.extend(arm_durations)
-            arm_p50.append(float(np.median(arm_durations)))
+        for _ in range(args.samples):
+            start = time.perf_counter()
+            result = policy.infer(observation, noise=noise)
+            durations.append((time.perf_counter() - start) * 1000)
+            current_actions = np.asarray(result["actions"])
+            if first_actions is None:
+                first_actions = current_actions.copy()
+            elif not np.array_equal(first_actions, current_actions):
+                raise ValueError("fixed Qwen-Drive input produced different trajectories")
         actions = np.asarray(result["actions"], dtype=np.float32)
         if actions.shape != (50, 3) or not np.isfinite(actions).all():
             raise ValueError(f"expected finite trajectory (50, 3), got {actions.shape}")
@@ -83,10 +77,7 @@ def main() -> None:
             "trajectory_shape": list(actions.shape),
             "request_p50_ms": float(np.median(durations)),
             "request_p95_ms": float(np.percentile(durations, 95)),
-            "samples": len(durations),
-            "samples_per_arm": args.samples,
-            "arms": args.arms,
-            "arm_p50_ms": arm_p50,
+            "samples": args.samples,
             "warmup": args.warmup,
         }
         if args.reference is not None:

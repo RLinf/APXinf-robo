@@ -21,7 +21,7 @@ Measure request latency through Robo's example; its JSON reports P50 and P95:
 python examples/qwen_drive_infer.py \
   --model-dir /models/Qwen-Drive-1.0-4B \
   --inputs /data/qwen-drive/public-inputs \
-  --warmup 10 --samples 30 --arms 2 \
+  --warmup 10 --samples 30 \
   --out devlocal/qwen-drive-eval/latency.json
 ```
 
