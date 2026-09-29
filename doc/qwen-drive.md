@@ -11,9 +11,9 @@ Robo loads the policy through `load_policy` and returns a `(50, 3)` trajectory.
 Direct planning, batch 1, ten flow steps, twelve input frames. Request P50
 includes decoded-image preprocessing and the host trajectory.
 
-| Hardware | Precision | Latency |
-|---|---|---:|
-| Jetson AGX Thor | BF16 | 482.60 ms |
+| Hardware | Precision | Latency | NAVSIM PDM (242 scenes) |
+|---|---|---:|---:|
+| Jetson AGX Thor | BF16 | 482.60 ms | 85.6786 |
 
 Measure request latency through Robo's example; its JSON reports P50 and P95:
 

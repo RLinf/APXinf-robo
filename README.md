@@ -150,11 +150,9 @@ One or two views, batch 1. Best recorded P50.
 Direct planning, batch 1, 10 flow steps and 12 input frames. Request P50 from
 decoded images to host trajectory.
 
-| Hardware | Precision | Latency |
-|---|---|---:|
-| Jetson AGX Thor | BF16 | 482.60 ms |
-
-NAVSIM fixed 242-scene subset: PDM **85.6786**.
+| Hardware | Precision | Latency | NAVSIM PDM (242 scenes) |
+|---|---|---:|---:|
+| Jetson AGX Thor | BF16 | 482.60 ms | 85.6786 |
 
 [Benchmark and trajectory evaluation](doc/qwen-drive.md).
 
