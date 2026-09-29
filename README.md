@@ -154,6 +154,8 @@ decoded images to host trajectory.
 |---|---|---:|
 | Jetson AGX Thor | BF16 | 482.60 ms |
 
+NAVSIM fixed 242-scene subset: PDM **85.6786**.
+
 [Benchmark and trajectory evaluation](doc/qwen-drive.md).
 
 
