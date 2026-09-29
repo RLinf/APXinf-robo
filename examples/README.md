@@ -14,6 +14,8 @@ Run commands from the APXinf-robo repository root after
 | [`serve_websocket.py`](serve_websocket.py) | L3 | `websocket_server`, plus a real client reading the served contract off the wire. | GPU + checkpoint + `[serve]` |
 | [`lerobot_loop.py`](lerobot_loop.py) | L2 + preset | Drop `ApxInfPolicy` into lerobot's `record_loop`, leaving the robot side untouched. | lerobot + GPU |
 | [`g1_adapter_smoke.py`](g1_adapter_smoke.py) | L2 + preset | Verify G1 processing and action shapes. | GPU + 3-view checkpoint |
+| [PI0-FAST on LIBERO](#pi0-fast-on-libero) | L2 + preset | Keep both finger joints and use checkpoint-owned normalization. | GPU + PI0-FAST checkpoint/tokenizers |
+| [GR00T N1.7 on LIBERO](#gr00t-n17-on-libero) | L2 + environment conversion | Pass named state and convert the decoded gripper for robosuite. | GPU + prepared GR00T checkpoint/processor |
 
 To verify L1/L2 numerical parity with a compatible checkpoint:
 
@@ -23,7 +25,7 @@ APXINF_PARITY_CHECKPOINT=/path/to/checkpoint pytest tests/test_parity.py
 
 The test compares model outputs bitwise for the same captured inputs.
 For engine-only APIs, see the bundled engine's
-[Python examples](https://github.com/infinigence/ApxInf/tree/ba968f63c9820f7db368bea0ce17bb890aa90781/python/apxinf/examples).
+[Python examples](../apxinf/python/apxinf/examples/README.md).
 
 ## Dependencies
 
@@ -79,3 +81,94 @@ published LIBERO numbers see
 
 Every example that unnormalizes accepts `--norm-stats`. `bare_model_infer.py`
 returns normalized actions and does not accept `--norm-stats`.
+
+## PI0-FAST on LIBERO
+
+Use Robo's `franka_libero` preset for the two camera keys and action width.
+PI0-FAST still needs **both** mirrored finger joints in its eight-value state;
+the seven-value PI0.5 evaluation default would change its prompt. The policy
+reads normalization statistics from its own LeRobot checkpoint, so do not pass
+`--norm-stats` or flow-step options. Its text and FAST tokenizers must be present
+at the checkpoint-declared local paths or in the local Hugging Face cache.
+
+```sh
+python examples/robot_policy_infer.py \
+  --robot franka_libero --model-dir /models/pi0fast-libero-v044 \
+  --precision bf16
+```
+
+That command uses synthetic observations to check the loading and inference
+contract. For frames from a LIBERO simulator, feed the same policy through
+Robo's environment conversion:
+
+```python
+from apxinf_robo import build_robot_policy
+from apxinf_robo.envs.libero import libero_images, libero_state
+
+policy = build_robot_policy("franka_libero", model_dir, precision="bf16")
+try:
+    keys = policy.metadata["image_keys"]
+    frames = libero_images(raw["agentview_image"], raw["robot0_eye_in_hand_image"])
+    observation = {
+        keys[0]: frames[0],
+        keys[1]: frames[1],
+        policy.metadata["state_key"]: libero_state(raw, finger_joints=2),
+        policy.metadata["prompt_key"]: task_description,
+    }
+    actions = policy.infer(observation)["actions"]
+finally:
+    policy.close()
+```
+
+Here `raw` is one LIBERO simulator observation and `task_description` is its
+instruction. `actions` is the detokenized, unnormalized action chunk; the
+policy also returns `action_tokens` for inspection. Replace the synthetic
+command with real observations before measuring task success.
+
+## GR00T N1.7 on LIBERO
+
+First [prepare the checkpoint's local Cosmos processor resources](../apxinf/doc/gr00t-n1.7.md#loading)
+and install the compatible Isaac-GR00T and Transformers environment. GR00T's
+official processor owns its model-specific state and action decode, so use
+Robo's L2 `load_policy` entry point with explicit LIBERO wire keys. Robo's
+`franka_libero` preset does not apply GR00T's decoded-gripper conversion;
+`libero_gr00t_action` supplies that conversion before sending actions to
+robosuite.
+
+```python
+from apxinf_robo import load_policy
+from apxinf_robo.envs.libero import (
+    libero_gr00t_action,
+    libero_gr00t_state,
+    libero_images,
+)
+
+image_keys = ("observation/image", "observation/wrist_image")
+policy = load_policy(
+    "/models/GR00T-N1.7-LIBERO/libero_10",
+    precision="bf16",
+    image_keys=image_keys,
+    state_key="observation/state",
+    prompt_key="prompt",
+)
+try:
+    frames = libero_images(raw["agentview_image"], raw["robot0_eye_in_hand_image"])
+    observation = {
+        image_keys[0]: frames[0],
+        image_keys[1]: frames[1],
+        "observation/state": libero_gr00t_state(raw),
+        "prompt": task_description,
+    }
+    actions = libero_gr00t_action(policy.infer(observation)["actions"])
+finally:
+    policy.close()
+```
+
+GR00T consumes named XYZ, axis-angle and **two** finger joint values. The action
+conversion maps its decoded `0=closed, 1=open` gripper to robosuite's
+`+1=closed, -1=open` convention. Here `raw` and `task_description` are the
+simulator observation and instruction described above. The generic
+`robot_policy_infer.py` builds a flat synthetic state and does not perform this
+conversion; use the code above
+for simulator integration. FP8 additionally needs a matching `calibration=`
+profile, as described in the engine's GR00T guide.

@@ -130,6 +130,8 @@ Two views, 224x224 NHWC `uint8`, batch 1.
 | Jetson AGX Orin | BF16 | 117.3 ms | 25.34 ms |
 | RTX 4090 | BF16 | 20.9 ms | 5.24 ms |
 
+[Robo-side LIBERO integration](examples/README.md#pi0-fast-on-libero).
+
 ### GR00T N1.7
 
 One or two views, batch 1. Best recorded P50.
@@ -140,6 +142,8 @@ One or two views, batch 1. Best recorded P50.
 | Jetson AGX Thor | FP8 | 32.557 ms | 35.436 ms |
 | Jetson AGX Orin | BF16 | 75.778 ms | 84.864 ms |
 | Jetson AGX Orin | W8A8 | 56.711 ms | 64.924 ms |
+
+[Robo-side LIBERO integration](examples/README.md#gr00t-n17-on-libero).
 
 ### Qwen-Drive
 

@@ -10,7 +10,12 @@ same values.
 
 import numpy as np
 
-from apxinf_robo.envs.libero import libero_images, libero_state
+from apxinf_robo.envs.libero import (
+    libero_gr00t_action,
+    libero_gr00t_state,
+    libero_images,
+    libero_state,
+)
 
 
 def test_libero_images_rotate_each_frame_by_180_degrees():
@@ -48,6 +53,50 @@ def test_libero_state_collapses_mirrored_gripper_joints():
         np.array([0.1, 0.2, 0.3, 0.0, 0.0, 0.0, 0.04], dtype=np.float32),
     )
     assert state.dtype == np.float32
+
+
+def test_two_finger_state_and_gr00t_named_state_preserve_both_joints():
+    observation = {
+        "robot0_eef_pos": np.array([0.1, 0.2, 0.3]),
+        "robot0_eef_quat": np.array([0.0, 0.0, 0.0, 1.0]),
+        "robot0_gripper_qpos": np.array([0.04, -0.04]),
+    }
+
+    np.testing.assert_array_equal(
+        libero_state(observation, finger_joints=2),
+        np.array([0.1, 0.2, 0.3, 0, 0, 0, 0.04, -0.04], dtype=np.float32),
+    )
+    named = libero_gr00t_state(observation)
+    assert set(named) == {"x", "y", "z", "roll", "pitch", "yaw", "gripper"}
+    np.testing.assert_array_equal(named["x"], np.array([0.1], dtype=np.float32))
+    np.testing.assert_array_equal(
+        named["gripper"], np.array([0.04, -0.04], dtype=np.float32)
+    )
+
+
+def test_gr00t_decoded_gripper_uses_robosuite_convention():
+    actions = np.zeros((3, 7), dtype=np.float32)
+    actions[:, -1] = [0.0, 0.5, 1.0]
+
+    converted = libero_gr00t_action(actions)
+
+    np.testing.assert_array_equal(converted[:, -1], [1.0, 0.0, -1.0])
+    np.testing.assert_array_equal(converted[:, :6], actions[:, :6])
+    np.testing.assert_array_equal(actions[:, -1], [0.0, 0.5, 1.0])
+
+
+def test_gr00t_named_state_rejects_an_incorrect_position_width():
+    observation = {
+        "robot0_eef_pos": np.zeros(2),
+        "robot0_eef_quat": np.array([0.0, 0.0, 0.0, 1.0]),
+        "robot0_gripper_qpos": np.array([0.04, -0.04]),
+    }
+    try:
+        libero_gr00t_state(observation)
+    except ValueError as error:
+        assert "8 values" in str(error)
+    else:
+        raise AssertionError("expected a ValueError for a two-value position")
 
 
 def test_libero_state_converts_the_quaternion_to_an_axis_angle():

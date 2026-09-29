@@ -80,6 +80,20 @@ def test_walloss_keeps_precision(tmp_path, monkeypatch):
     assert seen == [{"precision": "bf16"}]
 
 
+@pytest.mark.parametrize("model_type", ["pi0_fast", "gr00t"])
+def test_other_vla_families_keep_precision(tmp_path, monkeypatch, model_type):
+    (tmp_path / "config.json").write_text(json.dumps({"model_type": model_type}))
+    seen = []
+    monkeypatch.setattr(
+        engine, "require_apxinf",
+        lambda: SimpleNamespace(
+            AutoPolicy=SimpleNamespace(from_pretrained=lambda *a, **kw: seen.append(kw))
+        ),
+    )
+    engine.load_policy(tmp_path, precision="bf16")
+    assert seen == [{"precision": "bf16"}]
+
+
 def test_random_handle_uses_model_runner(monkeypatch):
     import sys
 

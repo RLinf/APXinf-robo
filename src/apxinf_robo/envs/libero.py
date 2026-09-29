@@ -5,13 +5,10 @@ frames directly. For the out-of-process path -- a simulator host with no ApxInf
 installed, talking to a WebSocket server -- copy ``scripts/connect_libero.py``
 instead; it is deliberately standalone and shares no code with this module.
 
-The two paths do not build identical state vectors, and that is not an
-oversight: ``libero_state`` here emits one gripper coordinate (7 values) to match
-the evaluation checkpoints this repository was built against, while the
-standalone script emits both raw finger joints (8 values) for the PI0.5-LIBERO
-Panda contract. Which one is right is a property of the checkpoint, so the choice
-belongs to whoever picks the checkpoint -- check it against
-:func:`~apxinf_robo.preflight.check_checkpoint` rather than assuming.
+``libero_state`` keeps the historical seven-value state by default. Checkpoints
+trained with both finger joints (including PI0-FAST) request eight values with
+``finger_joints=2``. GR00T uses a named state and a separate decoded-gripper
+conversion, matching its official LIBERO processor contract.
 """
 
 from __future__ import annotations
@@ -26,6 +23,8 @@ __all__ = [
     "quat_to_axis_angle",
     "libero_images",
     "libero_state",
+    "libero_gr00t_state",
+    "libero_gr00t_action",
     "make_env",
     "to_apxinf_observation",
 ]
@@ -47,18 +46,48 @@ def libero_images(base: np.ndarray, wrist: np.ndarray) -> np.ndarray:
     )
 
 
-def libero_state(observation) -> np.ndarray:
-    """Convert LIBERO's two mirrored finger joints to one gripper coordinate."""
+def libero_state(observation, *, finger_joints: int = 1) -> np.ndarray:
+    """Return a seven- or eight-value state for the selected checkpoint."""
     gripper = np.asarray(observation["robot0_gripper_qpos"]).reshape(-1)
     if gripper.size != 2:
         raise ValueError(f"robot0_gripper_qpos must have 2 values, got {gripper.size}")
+    if finger_joints not in (1, 2):
+        raise ValueError(f"finger_joints must be 1 or 2, got {finger_joints}")
     return np.concatenate(
         (
             observation["robot0_eef_pos"],
             quat_to_axis_angle(observation["robot0_eef_quat"]),
-            gripper[:1],
+            gripper[:finger_joints],
         )
     ).astype(np.float32, copy=False)
+
+
+def libero_gr00t_state(observation) -> dict[str, np.ndarray]:
+    """Preserve GR00T's named XYZ, axis-angle and two-finger state."""
+    state = libero_state(observation, finger_joints=2)
+    if state.size != 8:
+        raise ValueError(f"GR00T LIBERO state must have 8 values, got {state.size}")
+    return {
+        "x": np.ascontiguousarray(state[0:1]),
+        "y": np.ascontiguousarray(state[1:2]),
+        "z": np.ascontiguousarray(state[2:3]),
+        "roll": np.ascontiguousarray(state[3:4]),
+        "pitch": np.ascontiguousarray(state[4:5]),
+        "yaw": np.ascontiguousarray(state[5:6]),
+        "gripper": np.ascontiguousarray(state[6:8]),
+    }
+
+
+def libero_gr00t_action(actions: np.ndarray) -> np.ndarray:
+    """Map GR00T's decoded gripper (0 closed, 1 open) to robosuite (+1/-1)."""
+    array = np.asarray(actions, dtype=np.float32)
+    if array.ndim not in (1, 2) or array.shape[-1] != 7:
+        raise ValueError(f"GR00T LIBERO actions must end in 7 values, got {array.shape}")
+    if not np.isfinite(array).all():
+        raise ValueError("GR00T LIBERO actions must contain only finite values")
+    converted = np.ascontiguousarray(array.copy())
+    converted[..., -1] = -np.sign(2.0 * converted[..., -1] - 1.0)
+    return converted
 
 
 def make_env(task, seed: int):
