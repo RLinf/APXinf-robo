@@ -18,18 +18,18 @@ actions, following the [GR00T benchmark procedure](../apxinf/doc/gr00t-n1.7.md#f
 | Jetson AGX Orin | BF16 | 75.778 ms | 84.864 ms |
 | Jetson AGX Orin | W8A8 | 56.711 ms | 64.924 ms |
 
-Benchmark full two-view policy requests through Robo's L2 loader. The script
-captures one LIBERO-10 task-0 observation before timing and holds it fixed:
+Use the official processor fixture and the pinned model-core CUDA Graph runner
+from the Robo checkout. Choose the one- or two-view fixture for the matching
+table column:
 
 ```sh
-python scripts/bench_libero_policy.py \
-  --model-dir /models/GR00T-N1.7-LIBERO/libero_10 --precision bf16 \
-  --suite libero_10 --task-id 0 \
-  --warmup 10 --samples 30 \
-  --out devlocal/gr00t-eval/latency.json
+python scripts/bench_gr00t.py \
+  --checkpoint /models/GR00T-N1.7-LIBERO/libero_10 \
+  --backbone /models/GR00T-N1.7-LIBERO/libero_10/assets/cosmos \
+  --fixture /data/gr00t/libero-two-view --precision bf16 \
+  --warmup 10 --iterations 50 \
+  --output devlocal/gr00t-eval/latency.json
 ```
-
-The JSON reports Robo request P50/P95, including preprocessing and action decoding.
 
 ## Accuracy evaluation
 

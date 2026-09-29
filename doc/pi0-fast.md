@@ -23,18 +23,18 @@ fixed frames with different action-token counts, as in the [PI0-FAST benchmark](
 | Jetson AGX Orin | BF16 | 117.3 ms | 25.34 ms |
 | RTX 4090 | BF16 | 20.9 ms | 5.24 ms |
 
-Benchmark full two-view policy requests through Robo's L2 loader. The script
-captures one LIBERO-10 task-0 observation before timing and holds it fixed:
+Capture LIBERO frames, then run the same L1 token-count fit from the Robo
+checkout. The report gives `fixed_ms`, `per_step_ms`, and fit quality:
 
 ```sh
-python scripts/bench_libero_policy.py \
+python scripts/collect_pi0_fast_frames.py \
+  --suite libero_10 --trials-per-task 2 \
+  --out devlocal/pi0fast-eval/libero-frames.npz
+python scripts/bench_pi0_fast.py \
   --model-dir /models/pi0fast-libero-v044 --precision bf16 \
-  --suite libero_10 --task-id 0 \
-  --warmup 10 --samples 30 \
+  --frames devlocal/pi0fast-eval/libero-frames.npz \
   --out devlocal/pi0fast-eval/latency.json
 ```
-
-The JSON reports Robo request P50/P95, including preprocessing and action decoding.
 
 ## Accuracy evaluation
 
