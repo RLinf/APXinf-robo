@@ -6,6 +6,8 @@ also needs CUDA PyTorch in the selected Python environment for reference noise
 generation, and Pillow 12.3.0 for the validated preprocessing contract. Torch
 runs in a child process so its bundled CUDA/cuBLAS libraries do not preload
 into native inference. Scoring can use a separate CPU environment.
+For the Thor performance configuration, build the binding with the SM110 AOT
+operator bundle as described in the [ApxInf build instructions](../apxinf/doc/qwen-drive-benchmark.md#build-and-load).
 
 ## Performance
 
