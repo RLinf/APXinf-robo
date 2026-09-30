@@ -1,10 +1,32 @@
 # GR00T N1.7 on LIBERO
 
 Install APXinf-robo with its LIBERO dependencies, the LIBERO simulator, the
-ApxInf CUDA binding, and
-the matching Isaac-GR00T/Transformers processor environment. Prepare the
-checkpoint's local Cosmos processor resources as described in the
-[ApxInf loading guide](../apxinf/doc/gr00t-n1.7.md#loading).
+ApxInf CUDA binding, and the matching Isaac-GR00T/Transformers processor
+environment. Download the LIBERO-10 checkpoint and the Cosmos processor
+resources (Cosmos weights are not needed):
+
+```sh
+pip install -U huggingface_hub
+hf download nvidia/GR00T-N1.7-LIBERO \
+  --include 'libero_10/*.json' --include 'libero_10/*.safetensors' \
+  --local-dir /models/GR00T-N1.7-LIBERO
+hf download nvidia/Cosmos-Reason2-2B --exclude '*.safetensors' \
+  --local-dir /models/nvidia/Cosmos-Reason2-2B
+python - <<'PY'
+from apxinf import Gr00tPolicy
+
+Gr00tPolicy.prepare_assets(
+    "/models/GR00T-N1.7-LIBERO/libero_10",
+    "/models/nvidia/Cosmos-Reason2-2B",
+)
+PY
+```
+
+Cosmos-Reason2-2B is gated on Hugging Face; accept its license and authenticate
+before downloading. The asset preparation copies the processor resources into
+the checkpoint; later benchmark and inference commands need only `--model-dir`.
+See the [ApxInf loading guide](../apxinf/doc/gr00t-n1.7.md#loading) for the
+required files and processor environment.
 
 ## Performance
 
@@ -18,57 +40,43 @@ actions, following the [GR00T benchmark procedure](../apxinf/doc/gr00t-n1.7.md#f
 | Jetson AGX Orin | BF16 | 75.778 ms | 84.864 ms |
 | Jetson AGX Orin | W8A8 | 56.711 ms | 64.924 ms |
 
-Download the official
-[NVIDIA GR00T-N1.7-LIBERO checkpoint](https://huggingface.co/nvidia/GR00T-N1.7-LIBERO/tree/main/libero_10)
-and the
-[LIBERO-10 dataset](https://huggingface.co/datasets/IPEC-COMMUNITY/libero_10_no_noops_1.0.0_lerobot)
-referenced by NVIDIA's
-[LIBERO guide](https://github.com/NVIDIA/Isaac-GR00T/blob/51d4c89f72fda44cbf77285c6a8114b52676b8a1/examples/LIBERO/README.md):
+The benchmark constructs deterministic tensors in memory in the pinned engine.
+It needs the prepared model directory only; processor assets are discovered
+under `assets/cosmos`. It does not read images, saved tensors or a dataset.
+The model-core timing boundary and 90/156-token one/two-view shapes match the
+engine benchmark. Synthetic outputs are for latency, not task accuracy.
+
+Build once and run each view count for the selected hardware/precision:
 
 ```sh
-hf download nvidia/GR00T-N1.7-LIBERO \
-  --revision 2ea293aa20ba7cf5bbf3ba17a5fbcb1a01cbfe21 \
-  --include "libero_10/*" --local-dir /models/GR00T-N1.7-LIBERO
-hf download --repo-type dataset \
-  IPEC-COMMUNITY/libero_10_no_noops_1.0.0_lerobot \
-  --revision e1a223d30b896c1613f270a2bfc63d382b3de7e1 \
-  --local-dir /data/libero_10_no_noops_1.0.0_lerobot
+cargo build --manifest-path apxinf/Cargo.toml --release \
+  -p apxinf-model --features cuda --example gr00t_bench
+for views in 1 2; do
+  python scripts/bench_gr00t.py \
+    --model-dir /models/GR00T-N1.7-LIBERO/libero_10 --precision bf16 \
+    --views "$views" --warmup 30 --samples 200 \
+    --binary apxinf/target/release/examples/gr00t_bench \
+    --tactics "devlocal/gr00t-eval/thor-bf16-${views}v-tactics.json" --autotune \
+    --out "devlocal/gr00t-eval/thor-bf16-${views}v.json"
+done
 ```
 
-Use NVIDIA Isaac-GR00T revision
-[`51d4c89`](https://github.com/NVIDIA/Isaac-GR00T/tree/51d4c89f72fda44cbf77285c6a8114b52676b8a1),
-copy its LIBERO modality description into the downloaded dataset, and run the
-official processor to create both fixed-input fixtures:
+| Table row | Precision argument | Additional argument |
+|---|---|---|
+| Thor BF16 | `--precision bf16` | None |
+| Thor FP8 | `--precision fp8` | `--calibration /path/to/matching-calibration.json` |
+| Orin BF16 | `--precision bf16` | None |
+| Orin W8A8 | `--precision int8` | None |
 
-```sh
-git clone https://github.com/NVIDIA/Isaac-GR00T.git /opt/Isaac-GR00T
-git -C /opt/Isaac-GR00T checkout 51d4c89f72fda44cbf77285c6a8114b52676b8a1
-cp /opt/Isaac-GR00T/examples/LIBERO/modality.json \
-  /data/libero_10_no_noops_1.0.0_lerobot/meta/modality.json
-python scripts/prepare_gr00t_fixture.py \
-  --checkpoint /models/GR00T-N1.7-LIBERO/libero_10 \
-  --backbone /models/GR00T-N1.7-LIBERO/libero_10/assets/cosmos \
-  --dataset /data/libero_10_no_noops_1.0.0_lerobot
-```
+Use separate paths for each hardware, precision and view count. The first run
+creates the tactic database; repeat with `--tactics` and omit `--autotune` to
+verify reuse. Lock clocks/fan and exclude other GPU jobs. CUDA/cuBLAS and kernel
+identities must match the database. Reports must say `cuda-graph`; retain the
+raw samples and artifact hashes. See the engine's
+[benchmark contract](../apxinf/doc/gr00t-n1.7.md#fixed-input-benchmark).
 
-This reads public episode 0, step 0 and writes `one-view/` and `two-view/`
-under `devlocal/gr00t-n1d7/fixtures/`. The tensors are deterministic model-core
-inputs with fixed-zero diffusion noise. Each manifest records both source-file
-and generated-tensor SHA256 hashes. They reproduce the benchmark input shapes
-and can also drive model-core numerical parity checks; they do not replace the
-closed-loop LIBERO accuracy evaluation below.
-
-Run the pinned model-core CUDA Graph benchmark with the generated fixture.
-Choose the one- or two-view directory for the matching table column:
-
-```sh
-python scripts/bench_gr00t.py \
-  --checkpoint /models/GR00T-N1.7-LIBERO/libero_10 \
-  --backbone /models/GR00T-N1.7-LIBERO/libero_10/assets/cosmos \
-  --fixture devlocal/gr00t-n1d7/fixtures/two-view --precision bf16 \
-  --warmup 10 --iterations 50 \
-  --output devlocal/gr00t-eval/latency.json
-```
+The table retains the previously published results. Use the command above for
+new measurements. See the engine document for timing boundaries.
 
 ## Accuracy evaluation
 
@@ -96,3 +104,8 @@ For a service deployment, use `apxinf-robo serve --robot franka_libero
 --model-dir /models/GR00T-N1.7-LIBERO/libero_10 --precision bf16`, then select
 `--backend websocket` in the evaluator. See the [observation and gripper
 contract](../examples/README.md#gr00t-n17-on-libero).
+
+Run the accuracy command for each precision/hardware row above, adding the
+matching FP8 calibration when needed. Use independent result paths for every
+run. Accuracy always uses simulator observations through Robo's shared
+`eval-libero` entry, as PI0.5 does.
