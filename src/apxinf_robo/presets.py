@@ -20,17 +20,23 @@ from .embodiments.base import (
     ROBOT_ALIASES,
     ROBOT_PRESETS,
     VIEW_SLOTS,
+    Embodiment,
     RobotPreset,
     available_robots,
     get_robot_preset,
     register_robot_preset,
 )
 from .embodiments.franka import FRANKA
+from .embodiments.dual_franka import build_dual_franka_policy
+from .embodiments.yam import build_yam_policy
+from .conventions.rlinf import DUAL_FRANKA as DUAL_FRANKA_KEYS, YAM as YAM_KEYS
 from .embodiments.unitree_g1 import UNITREE_G1_BODY
 
 __all__ = [
     "FRANKA_LIBERO",
     "UNITREE_G1",
+    "DUAL_FRANKA",
+    "YAM",
     "ROBOT_PRESETS",
     "ROBOT_ALIASES",
     "available_robots",
@@ -60,6 +66,38 @@ UNITREE_G1 = register_robot_preset(
         convention=conventions.UNITREE_G1,
         summary="Unitree G1: 3 cameras, 16-DoF state, delta joint actions, 32->16 encode",
     )
+)
+
+
+DUAL_FRANKA = register_robot_preset(
+    RobotPreset(
+        name="dual_franka_tcp_rot6d",
+        embodiment=Embodiment(
+            name="dual_franka",
+            num_cameras=3,
+            action_dim=20,
+            builder=build_dual_franka_policy,
+            builder_kwargs={"norm_dtype": "float64"},
+        ),
+        convention=DUAL_FRANKA_KEYS,
+        summary="Dual Franka: body-frame delta checkpoint, absolute TCP rot6d output",
+    ),
+)
+YAM = register_robot_preset(
+    RobotPreset(
+        name="yam_joint",
+        embodiment=Embodiment(
+            name="yam",
+            num_cameras=3,
+            action_dim=14,
+            state_dim=14,
+            action_width=14,
+            builder=build_yam_policy,
+            builder_kwargs={"norm_dtype": "float64"},
+        ),
+        convention=YAM_KEYS,
+        summary="Dual YAM: delta-joint checkpoint, absolute qpos14 output",
+    ),
 )
 
 
