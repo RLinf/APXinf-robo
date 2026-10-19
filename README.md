@@ -322,6 +322,10 @@ into these camera keys, while this package owns the state/action arithmetic.
 The dual-Franka state remains required even with state tokens disabled: it is
 the reference pose for the output transform. These paths currently have offline
 transform/pipeline coverage; real-checkpoint and hardware validation is pending.
+Raw RLinf `actor/model_state_dict/full_weights.pt` checkpoints require an export
+with an engine-supported layout and weight naming. These presets do not convert
+RLinf training checkpoints automatically; matching action dimensions alone does
+not establish weight compatibility.
 
 `--help` lists every preset. If an installed client uses different keys, pass the
 input fields through `--image-keys` / `--state-key`, or register a preset. See
