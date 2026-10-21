@@ -263,10 +263,12 @@ width instead of advertising one nothing emits.
 
 ### Step 4 — register the convention and the preset
 
-A preset pairs an `Embodiment` with a `Convention`. The embodiment defines the
-robot's camera count, action widths, and processing builder. The convention
-defines dataset wire keys and state routing. They are separate because they vary
-independently: LIBERO and DROID are the same arm with different dialects.
+A preset pairs an `Embodiment` with a `Convention` and declares whether the
+checkpoint discretizes state into the prompt. The embodiment defines the robot's
+camera count, action widths, and processing builder. The convention defines
+dataset wire keys. They are separate because they vary independently: LIBERO and
+DROID are the same arm with different dialects. State encoding belongs to the
+preset because it follows the checkpoint's training config, not the wire keys.
 
 ```python
 # src/apxinf_robo/conventions/mydataset.py — the dialect, independent of any arm
@@ -276,7 +278,6 @@ MY_DATASET_KEYS = register_convention(Convention(
     name="mydataset",
     image_keys=("observation/image", "observation/wrist_image"),  # in view-slot order
     state_key="observation/state",
-    discrete_state=False,       # False *drops* state entirely — not "keeps it raw"
 ))
 
 # src/apxinf_robo/embodiments/myarm.py — the body
@@ -298,11 +299,14 @@ MY_ROBOT = register_robot_preset(RobotPreset(
     embodiment=MY_ARM,
     convention=conventions.MY_DATASET_KEYS,
     summary="MyArm, MyDataset keys: 2 cameras, 7-dim action",
+    discrete_state=False,       # False *drops* state entirely — not "keeps it raw"
 ))
 ```
 
 To serve the same embodiment with another supported dataset contract, register
-another convention and preset pairing.
+another convention and preset pairing. A client that routes its cameras to view
+slots itself, such as RPent's APXInf server, needs no dialect: pair the preset
+with `conventions.CANONICAL`, which uses the engine's slot names.
 
 For a robot defined in another package, call `register_convention(...)` and
 `register_robot_preset(..., aliases=(...))` at your module scope; importing that
@@ -509,7 +513,7 @@ including the ones `franka_libero` skips:
 
 - `src/apxinf_robo/presets.py` — the registry and both presets
 - `src/apxinf_robo/embodiments/base.py` — `Embodiment` / `RobotPreset` machinery
-- `src/apxinf_robo/conventions/` — the LIBERO and G1 wire dialects
+- `src/apxinf_robo/conventions/` — the LIBERO, G1, and canonical wire keys
 - `src/apxinf_robo/embodiments/unitree_g1/steps.py` — decode-state,
   delta→absolute, 32→16 encode
 - `src/apxinf_robo/embodiments/unitree_g1/builder.py` — the builder that splices

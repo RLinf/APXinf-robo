@@ -45,42 +45,51 @@ __all__ = [
 
 #: --- deployable pairings -----------------------------------------------------
 
-#: Franka Panda under LIBERO's keys: 2 cameras, 7-dim action.
+#: Franka Panda under LIBERO's keys: 2 cameras, 7-dim action. State encoding is
+#: checkpoint-specific: PI0.5 drops it by default, while WallOSS discretizes it.
 FRANKA_LIBERO = register_robot_preset(
     RobotPreset(
         name="franka_libero",
         embodiment=FRANKA,
         convention=conventions.LIBERO,
         summary="Franka Panda, LIBERO keys: 2 cameras, 7-dim action (6 EEF deltas + gripper)",
+        discrete_state=None,
     ),
     aliases=("libero",),
 )
 
-#: Unitree G1 under its native wire convention.
+#: Unitree G1 under its native wire convention, with state discretized into the
+#: prompt.
 UNITREE_G1 = register_robot_preset(
     RobotPreset(
         name="unitree_g1",
         embodiment=UNITREE_G1_BODY,
         convention=conventions.UNITREE_G1,
         summary="Unitree G1: 3 cameras, 16-DoF state, delta joint actions, 32->16 encode",
+        discrete_state=True,
     )
 )
 
-
+#: RLinf ``pi05_dualfranka_tcp_rot6d``: slots hold base, left wrist, right wrist.
+#: The checkpoint omits state tokens; state is still needed to restore absolute
+#: body-frame actions.
 DUAL_FRANKA = register_robot_preset(
     RobotPreset(
         name="dual_franka_tcp_rot6d",
         embodiment=DUAL_FRANKA_BODY,
-        convention=conventions.DUAL_FRANKA,
+        convention=conventions.CANONICAL,
         summary="Dual Franka: body-frame delta checkpoint, absolute TCP rot6d output",
+        discrete_state=False,
     ),
 )
+#: RLinf ``pi05_yam_joint``: slots hold top, left, right.
 YAM = register_robot_preset(
     RobotPreset(
         name="yam_joint",
         embodiment=YAM_BODY,
-        convention=conventions.YAM,
+        convention=conventions.CANONICAL,
         summary="Dual YAM: delta-joint checkpoint, absolute qpos14 output",
+        discrete_state=True,
     ),
 )
 

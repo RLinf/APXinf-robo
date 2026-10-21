@@ -13,16 +13,15 @@ from .base import (
     get_convention,
     register_convention,
 )
+from .canonical import CANONICAL
 from .libero import LIBERO
-from .rlinf import DUAL_FRANKA, YAM
 from .unitree_g1 import UNITREE_G1
 
 __all__ = [
     "Convention",
     "CONVENTIONS",
+    "CANONICAL",
     "LIBERO",
-    "DUAL_FRANKA",
-    "YAM",
     "UNITREE_G1",
     "available_conventions",
     "get_convention",
