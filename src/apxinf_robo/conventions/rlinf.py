@@ -6,6 +6,8 @@ model slot order (base, left wrist, right wrist), independent of wire order.
 
 from .base import Convention, register_convention
 
+__all__ = ["DUAL_FRANKA", "YAM"]
+
 DUAL_FRANKA = register_convention(
     Convention(
         name="rlinf_dual_franka",

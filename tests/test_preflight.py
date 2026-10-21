@@ -231,6 +231,25 @@ class NormStatsWidthTest(unittest.TestCase):
         )
         self.assertEqual([f for f in findings if f.level == WARN], [])
 
+    def test_dual_franka_accepts_padded_stats_without_state_tokens(self) -> None:
+        # RLinf calculates these stats after padding both state and actions to
+        # model width. The controller still consumes 20-value poses.
+        ckpt = CheckpointFixture(
+            self, actions=_stats(32), state=_stats(32)
+        ).write_tokenizer()
+        findings = check_checkpoint(ckpt.path, "dual_franka_tcp_rot6d")
+        self.assertEqual(
+            [f for f in findings if f.level == FAIL], [], format_findings(findings)
+        )
+        self.assertEqual(_levels(findings, "norm_stats['state']"), [])
+
+        # An explicit state-token override must check the declared 20-value
+        # physical state width, rather than silently accepting padded stats.
+        overridden = check_checkpoint(
+            ckpt.path, "dual_franka_tcp_rot6d", discrete_state=True
+        )
+        self.assertEqual(_levels(overridden, "norm_stats['state'] width"), [FAIL])
+
     def test_libero_preset_checks_its_own_asymmetric_widths(self) -> None:
         """LIBERO is 8-dim state / 7-dim action; the two are checked separately.
 

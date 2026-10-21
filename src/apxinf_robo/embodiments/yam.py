@@ -1,9 +1,10 @@
 """Dual-YAM joint policy transforms for RLinf's pi05_yam_joint config.
 
-Reference: RLinf 4c65548e7ade32b13ae101211f588a34a9f98305,
-``openpi/dataconfig/yam_dataconfig.py``. Both arms use six joint positions
-followed by an absolute gripper value. The default training transform subtracts
-state from joints only; inference must restore it after unnormalization.
+Reference: RLinf 196d40b6dec6f7a4063edee31cfeaa6ca0ee435a (#1702),
+``rlinf/models/embodiment/openpi/dataconfig/yam_dataconfig.py``.
+Both arms use six joint positions followed by an absolute gripper value.
+The training transform subtracts state from joints only; inference must
+restore it after unnormalization.
 """
 
 from __future__ import annotations
@@ -15,6 +16,10 @@ import numpy as np
 from apxinf.policies.base import Policy
 from apxinf.processors.base import ProcessorStep
 from apxinf.processors.transforms import ACTIONS, OBSERVATION, lookup_key
+
+from .base import Embodiment
+
+__all__ = ["YAM_BODY", "build_yam_policy"]
 
 YAM_DIM = 14
 YAM_DELTA_MASK = np.array([True] * 6 + [False] + [True] * 6 + [False])
@@ -58,8 +63,8 @@ def build_yam_policy(
     """Load the RLinf delta-joint YAM policy and expose absolute qpos14.
 
     Checkpoint selection and model dimensions remain the engine's concern.
-    This adapter implements the default ``use_delta_joint_actions=True``
-    training contract; absolute-action checkpoints need a different preset.
+    The ``pi05_yam_joint`` training contract uses deltas relative to the
+    observation for the twelve joints and absolute values for both grippers.
     """
     from apxinf.policies.base import ComposablePolicy
 
@@ -83,3 +88,18 @@ def build_yam_policy(
         action_dim=YAM_DIM,
         metadata={"robot": "yam_joint", **(metadata or {})},
     )
+
+
+YAM_BODY = Embodiment(
+    name="yam",
+    num_cameras=3,
+    action_dim=YAM_DIM,
+    state_dim=YAM_DIM,
+    action_width=YAM_DIM,
+    builder=build_yam_policy,
+    builder_kwargs={
+        # Match OpenPI's float64 normalization. State values near a discretization
+        # bin edge can otherwise produce different token ids.
+        "norm_dtype": "float64",
+    },
+)

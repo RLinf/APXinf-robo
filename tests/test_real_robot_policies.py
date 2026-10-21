@@ -67,5 +67,6 @@ def test_model_pipeline_preserves_state_for_absolute_action_recovery(
         result, np.tile(expected, (model.action_horizon, 1)), atol=1e-6
     )
     assert policy.action_dim == width
+    assert policy.metadata["state_dim"] == width
     assert (tokenizer.seen_states[-1] is None) == (robot == "dual_franka_tcp_rot6d")
     np.testing.assert_array_equal(obs["state"], state)
