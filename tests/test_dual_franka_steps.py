@@ -34,3 +34,22 @@ def test_degenerate_prediction_is_rejected(rotation):
         DualFrankaAbsoluteActions("state")(
             {"observation": {"state": state}, "actions": action[None]}
         )
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+def test_noncommuting_body_rotations_preserve_composition_order(dtype):
+    rx90 = [1, 0, 0, 0, 0, 1]
+    ry90 = [0, 0, -1, 0, 1, 0]
+    wire = np.array([0.1, 0.9, 1, 2, 3, *rx90, 4, 5, 6, *ry90], dtype=dtype)
+    action = np.array([0, 1, 0, *ry90, 0.3, 0, 0, 1, *rx90, 0.7], dtype=dtype)
+    data = DualFrankaState("state")(
+        {"observation": {"state": wire}, "actions": action[None]}
+    )
+    result = DualFrankaAbsoluteActions("state")(data)["actions"]
+    # Left Rx90 @ Ry90 has columns +y, +z; right Ry90 @ Rx90 has
+    # columns -z, +x. Reversing composition swaps these distinct rotations.
+    expected = np.array(
+        [[1, 2, 4, 0, 1, 0, 0, 0, 1, 0.3, 5, 5, 6, 0, 0, -1, 1, 0, 0, 0.7]], dtype=dtype
+    )
+    np.testing.assert_array_equal(result, expected)
+    assert result.dtype == dtype

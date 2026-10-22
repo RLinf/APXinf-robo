@@ -144,17 +144,18 @@ def _check_overrides(
 ) -> List[Finding]:
     """Flag serving knobs that were set away from what the preset declares."""
     findings: List[Finding] = []
-    if (
-        action_dim is not None
-        and preset.action_width is not None
-        and action_dim != preset.action_width
-    ):
+    # The controller width can differ from padded normalization statistics.
+    # When a robot step owns trimming (G1), action_width is the output contract.
+    expected = (
+        preset.action_dim if preset.action_dim is not None else preset.action_width
+    )
+    if action_dim is not None and expected is not None and action_dim != expected:
         findings.append(
             Finding(
                 WARN,
                 "action_dim",
                 f"--action-dim {action_dim} overrides preset {preset.name!r}'s "
-                f"{preset.action_width}",
+                f"{expected}",
                 "a width the robot does not have gets truncated or padded somewhere "
                 "downstream without an error. Drop the flag unless the deployed "
                 "client genuinely expects this width.",

@@ -250,6 +250,30 @@ class NormStatsWidthTest(unittest.TestCase):
         )
         self.assertEqual(_levels(overridden, "norm_stats['state'] width"), [FAIL])
 
+    def test_dual_franka_rejects_unsupported_action_stats_widths(self) -> None:
+        for width in (20, 21, 31, 33):
+            with self.subTest(width=width):
+                ckpt = CheckpointFixture(
+                    self, actions=_stats(width), state=_stats(32)
+                ).write_tokenizer()
+                findings = check_checkpoint(ckpt.path, "dual_franka_tcp_rot6d")
+                self.assertEqual(
+                    _levels(findings, "norm_stats['actions'] width"), [FAIL]
+                )
+
+    def test_dual_franka_action_override_uses_controller_width(self) -> None:
+        ckpt = CheckpointFixture(
+            self, actions=_stats(32), state=_stats(32)
+        ).write_tokenizer()
+        matching = check_checkpoint(
+            ckpt.path, "dual_franka_tcp_rot6d", action_dim=20
+        )
+        self.assertEqual(_levels(matching, "action_dim"), [])
+        padded = check_checkpoint(
+            ckpt.path, "dual_franka_tcp_rot6d", action_dim=32
+        )
+        self.assertEqual(_levels(padded, "action_dim"), [WARN])
+
     def test_libero_preset_checks_its_own_asymmetric_widths(self) -> None:
         """LIBERO is 8-dim state / 7-dim action; the two are checked separately.
 

@@ -321,6 +321,9 @@ into a real-robot policy. Their camera keys are the engine's view-slot names
 (`base_0_rgb`, `left_wrist_0_rgb`, `right_wrist_0_rgb`): the client routes each
 camera to its slot, as RPent's APXInf server does, while this package owns the
 state/action arithmetic.
+This RLinf dual-Franka preset requires 32-wide padded action normalization statistics;
+preflight rejects other widths, including unpadded 20-wide statistics. The
+controller output remains 20-wide.
 The dual-Franka state remains required even with state tokens disabled: it is
 the reference pose for the output transform. These paths currently have offline
 transform/pipeline coverage; real-checkpoint and hardware validation is pending.

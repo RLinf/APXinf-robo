@@ -143,8 +143,9 @@ DUAL_FRANKA_BODY = Embodiment(
     action_dim=20,
     state_dim=20,
     # RLinf computes stats after DualFrankaTcpRot6dInputs pads actions to the
-    # model width (32), so checking for 20-wide statistics would reject them.
-    action_width=None,
+    # model width (32). Require that export layout even though the controller
+    # receives 20 values; unpadded statistics are not a supported export.
+    action_width=32,
     builder=build_dual_franka_policy,
     builder_kwargs={
         # Match OpenPI's float64 unnormalization before SE(3) composition.
