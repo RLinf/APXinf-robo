@@ -51,6 +51,9 @@ def _rotation(rot6d: np.ndarray) -> np.ndarray:
     )
 
 
+DUAL_FRANKA_ACTION_DIM = 2 * (3 + 6 + 1)  # Two [xyz, rot6d, gripper] poses.
+
+
 class DualFrankaState(ProcessorStep):
     """Reorder RPent/RLinf state into the checkpoint's per-arm pose layout."""
 
@@ -80,11 +83,11 @@ class DualFrankaAbsoluteActions(ProcessorStep):
             raise ValueError(
                 "Dual Franka requires at least 20 finite reordered state values"
             )
-        if raw.ndim != 2 or raw.shape[1] < 20 or not np.isfinite(raw).all():
+        if raw.ndim != 2 or raw.shape[1] < DUAL_FRANKA_ACTION_DIM or not np.isfinite(raw).all():
             raise ValueError(
                 "Dual Franka requires a finite [horizon, >=20] action chunk"
             )
-        actions = raw[:, :20].copy()
+        actions = raw[:, :DUAL_FRANKA_ACTION_DIM].copy()
         for start in (0, 10):
             xyz = slice(start, start + 3)
             rotation = slice(start + 3, start + 9)
@@ -107,7 +110,7 @@ def build_dual_franka_policy(
     state_key: str,
     image_keys: Sequence[str],
     prompt_key: str = "prompt",
-    action_dim: int = 20,
+    action_dim: int = DUAL_FRANKA_ACTION_DIM,
     metadata: Optional[dict] = None,
     **load_kwargs: Any,
 ) -> Policy:
@@ -116,14 +119,16 @@ def build_dual_franka_policy(
 
     from ..engine import load_policy
 
-    if action_dim != 20:
-        raise ValueError("Dual Franka TCP rot6d actions must have 20 values")
+    if action_dim != DUAL_FRANKA_ACTION_DIM:
+        raise ValueError(
+            f"Dual Franka TCP rot6d actions must have {DUAL_FRANKA_ACTION_DIM} values"
+        )
     base = load_policy(
         model_dir,
         state_key=state_key,
         image_keys=tuple(image_keys),
         prompt_key=prompt_key,
-        action_dim=20,
+        action_dim=DUAL_FRANKA_ACTION_DIM,
         **load_kwargs,
     )
     if not isinstance(base, ComposablePolicy):
@@ -132,7 +137,7 @@ def build_dual_franka_policy(
     return base.with_adapter(
         before=[("dual_franka_state", DualFrankaState(state_key))],
         after=[("dual_franka_absolute", DualFrankaAbsoluteActions(state_key))],
-        action_dim=20,
+        action_dim=DUAL_FRANKA_ACTION_DIM,
         metadata={"robot": "dual_franka_tcp_rot6d", **(metadata or {})},
     )
 
@@ -140,12 +145,11 @@ def build_dual_franka_policy(
 DUAL_FRANKA_BODY = Embodiment(
     name="dual_franka",
     num_cameras=3,
-    action_dim=20,
+    action_dim=DUAL_FRANKA_ACTION_DIM,
     state_dim=20,
-    # RLinf computes stats after DualFrankaTcpRot6dInputs pads actions to the
-    # model width (32). Require that export layout even though the controller
-    # receives 20 values; unpadded statistics are not a supported export.
-    action_width=32,
+    # Only the effective pose dimensions are consumed. Statistics may include
+    # checkpoint padding; preflight checks coverage rather than exact width.
+    action_width=None,
     builder=build_dual_franka_policy,
     builder_kwargs={
         # Match OpenPI's float64 unnormalization before SE(3) composition.

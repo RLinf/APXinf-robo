@@ -75,7 +75,7 @@ class CheckpointFixture:
         (self.path / "model.safetensors").write_bytes(b"")
         return self
 
-    def write_metadata_pt(self, *, asset_id: str = "example-asset") -> "CheckpointFixture":
+    def write_metadata_pt(self, *, asset_id: str = "example-asset", action_dim: int = 32) -> "CheckpointFixture":
         """Write an openpi-shaped ``metadata.pt`` the way ``torch.save`` does.
 
         A zip whose ``<archive>/data.pkl`` member is an ordinary pickle — built
@@ -86,7 +86,7 @@ class CheckpointFixture:
             "config": {
                 "exp_name": "pi05_example",
                 "model": {
-                    "action_dim": 32,
+                    "action_dim": action_dim,
                     "action_horizon": 50,
                     "max_token_len": 200,
                     "discrete_state_input": True,
@@ -250,16 +250,38 @@ class NormStatsWidthTest(unittest.TestCase):
         )
         self.assertEqual(_levels(overridden, "norm_stats['state'] width"), [FAIL])
 
-    def test_dual_franka_rejects_unsupported_action_stats_widths(self) -> None:
-        for width in (20, 21, 31, 33):
+    def test_dual_franka_checks_effective_action_stats_coverage(self) -> None:
+        for width in (19, 20, 24, 32, 64):
             with self.subTest(width=width):
                 ckpt = CheckpointFixture(
                     self, actions=_stats(width), state=_stats(32)
                 ).write_tokenizer()
                 findings = check_checkpoint(ckpt.path, "dual_franka_tcp_rot6d")
                 self.assertEqual(
-                    _levels(findings, "norm_stats['actions'] width"), [FAIL]
+                    _levels(findings, "norm_stats['actions'] width"),
+                    [FAIL if width < 20 else INFO],
                 )
+
+    def test_dual_franka_checks_checkpoint_model_width(self) -> None:
+        for model_width in (16, 20, 32, 64):
+            with self.subTest(model_width=model_width):
+                ckpt = CheckpointFixture(self, actions=_stats(20)).write_tokenizer()
+                (ckpt.path / "config.json").write_text(json.dumps({
+                    "model_type": "pi05", "action_dim": model_width,
+                    "action_horizon": 50, "paligemma_variant": "gemma_2b",
+                }))
+                findings = check_checkpoint(ckpt.path, "dual_franka_tcp_rot6d")
+                self.assertEqual(_levels(findings, "model action width"),
+                                 [FAIL] if model_width < 20 else [])
+
+    def test_dual_franka_reads_model_width_from_openpi_metadata(self) -> None:
+        for model_width in (16, 64):
+            with self.subTest(model_width=model_width):
+                ckpt = (CheckpointFixture(self, actions=_stats(20)).write_tokenizer()
+                        .write_weights().write_metadata_pt(action_dim=model_width))
+                findings = check_checkpoint(ckpt.path, "dual_franka_tcp_rot6d")
+                self.assertEqual(_levels(findings, "model action width"),
+                                 [FAIL] if model_width < 20 else [])
 
     def test_dual_franka_action_override_uses_controller_width(self) -> None:
         ckpt = CheckpointFixture(

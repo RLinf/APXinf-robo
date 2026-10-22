@@ -70,3 +70,43 @@ def test_model_pipeline_preserves_state_for_absolute_action_recovery(
     assert policy.metadata["state_dim"] == width
     assert (tokenizer.seen_states[-1] is None) == (robot == "dual_franka_tcp_rot6d")
     np.testing.assert_array_equal(obs["state"], state)
+
+
+@pytest.mark.parametrize("model_width,stats_width", [(32, 20), (32, 24), (32, 32), (64, 64)])
+def test_dual_franka_loads_matching_effective_statistics(
+    monkeypatch, tmp_path, model_width, stats_width
+):
+    """Read real stats from disk; only model execution and tokenization are mocked."""
+    import json
+    from apxinf.policies.impls import pi05
+
+    preset = get_robot_preset("dual_franka_tcp_rot6d")
+    model = MockModel(num_views=3)
+    model.action_dim = model_width
+    predicted = np.zeros((model.action_horizon, model_width), dtype=np.float32)
+    model.infer_rgb = lambda *args, **kwargs: predicted.copy()
+    # Zero normalized actions decode to this non-identity physical delta.
+    midpoint = np.zeros(stats_width)
+    midpoint[:preset.action_dim] = [
+        0.1, 0.2, 0.3, 1, 0, 0, 0, 1, 0, 0.4,
+        0.5, 0.6, 0.7, 1, 0, 0, 0, 1, 0, 0.8,
+    ]
+    midpoint[preset.action_dim:] = 1234  # Padding must not reach the controller.
+    (tmp_path / "norm_stats.json").write_text(json.dumps({"norm_stats": {
+        "actions": {"q01": (midpoint - 1).tolist(), "q99": (midpoint + 1).tolist()}
+    }}))
+    monkeypatch.setattr(pi05, "_resolve_tokenizer", lambda *args: "unused")
+    monkeypatch.setattr(pi05, "PromptTokenizer", lambda *args, **kwargs: RecordingTokenizer())
+    monkeypatch.setattr(engine, "load_policy", lambda path, **kwargs:
+                        Pi05Policy.from_pretrained(path, model_runner=model, **kwargs))
+    policy = build_robot_policy(preset.name, tmp_path)
+    state = np.array([0, 0, 1, 2, 3, 1, 0, 0, 0, 1, 0,
+                      4, 5, 6, 1, 0, 0, 0, 1, 0], dtype=np.float64)
+    observation = {key: np.zeros((16, 16, 3), dtype=np.uint8) for key in preset.image_keys}
+    observation.update(state=state, prompt="move")
+    result = policy.infer(observation)["actions"]
+    expected = midpoint[:preset.action_dim].copy()
+    expected[:3] += state[2:5]
+    expected[10:13] += state[11:14]
+    np.testing.assert_allclose(result, np.tile(expected, (model.action_horizon, 1)), atol=1e-5)
+    assert result.shape == (model.action_horizon, preset.action_dim)

@@ -59,7 +59,8 @@ class Embodiment:
     #: has to be. Distinct from :attr:`action_dim`, which is a *loading* knob
     #: saying what to trim the model down to: the G1 declares ``action_dim=None``
     #: because ``UnitreeG1EncodeActions`` owns the truncation, but its actions are
-    #: still 16 wide and its statistics must be. ``None`` skips the check.
+    #: still 16 wide and its statistics must be. ``None`` permits padding and
+    #: checks coverage of ``action_dim`` when that effective width is declared.
     action_width: Optional[int] = None
     #: Factory that loads the checkpoint and wires this robot's pre/post steps.
     builder: Callable[..., Any] = _build_generic
