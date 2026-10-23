@@ -329,8 +329,8 @@ class BuildRobotPolicyTest(unittest.TestCase):
                 name="stub_keys",
                 image_keys=("cam/high", "cam/wrist"),
                 state_key="joints",
-                discrete_state=True,
             ),
+            discrete_state=True,
         )
         self._register(preset)
 

@@ -311,6 +311,28 @@ client's camera fields, state encoding, and action layout to that preset.
 |---|---|---|---|
 | `franka_libero` | `observation/image`, `observation/wrist_image` | `observation/state`; encoding is checkpoint-specific | 7-dim EEF delta |
 | `unitree_g1` | 3 views | 16-dim, discretized into the prompt | delta joints, 32→16 encode |
+| `dual_franka_tcp_rot6d` | model slots: base, left wrist, right wrist | `state`, 20-dim; grippers first on input; no state tokens | body-frame deltas restored to absolute `[xyz, rot6d, grip]` per arm |
+| `yam_joint` | model slots: top, left, right | `state`, 14-dim `[left joints, grip, right joints, grip]`, discretized into the prompt | joint deltas restored to absolute qpos14; grippers remain absolute |
+
+The Franka and YAM presets follow RLinf's `pi05_dualfranka_tcp_rot6d` and
+`pi05_yam_joint` training configurations respectively. They require matching
+checkpoints and normalization statistics; they do not turn a LIBERO checkpoint
+into a real-robot policy. Their camera keys are the engine's view-slot names
+(`base_0_rgb`, `left_wrist_0_rgb`, `right_wrist_0_rgb`): the client routes each
+camera to its slot, as RPent's APXInf server does, while this package owns the
+state/action arithmetic.
+The dual-Franka adapter consumes the first 20 action dimensions and their matching
+normalization statistics. Statistics may contain additional checkpoint padding;
+preflight rejects statistics narrower than the effective action vector. Width
+compatibility does not establish that statistics belong to a checkpoint. The
+controller output remains 20-wide.
+The dual-Franka state remains required even with state tokens disabled: it is
+the reference pose for the output transform. These paths currently have offline
+transform/pipeline coverage; real-checkpoint and hardware validation is pending.
+Raw RLinf `actor/model_state_dict/full_weights.pt` checkpoints require an export
+with an engine-supported layout and weight naming. These presets do not convert
+RLinf training checkpoints automatically; matching action dimensions alone does
+not establish weight compatibility.
 
 `--help` lists every preset. If an installed client uses different keys, pass the
 input fields through `--image-keys` / `--state-key`, or register a preset. See

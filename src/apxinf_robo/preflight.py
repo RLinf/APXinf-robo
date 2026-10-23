@@ -18,6 +18,7 @@ single list.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
@@ -144,17 +145,18 @@ def _check_overrides(
 ) -> List[Finding]:
     """Flag serving knobs that were set away from what the preset declares."""
     findings: List[Finding] = []
-    if (
-        action_dim is not None
-        and preset.action_width is not None
-        and action_dim != preset.action_width
-    ):
+    # The controller width can differ from padded normalization statistics.
+    # When a robot step owns trimming (G1), action_width is the output contract.
+    expected = (
+        preset.action_dim if preset.action_dim is not None else preset.action_width
+    )
+    if action_dim is not None and expected is not None and action_dim != expected:
         findings.append(
             Finding(
                 WARN,
                 "action_dim",
                 f"--action-dim {action_dim} overrides preset {preset.name!r}'s "
-                f"{preset.action_width}",
+                f"{expected}",
                 "a width the robot does not have gets truncated or padded somewhere "
                 "downstream without an error. Drop the flag unless the deployed "
                 "client genuinely expects this width.",
@@ -240,10 +242,12 @@ def inspect_for_robot(
     discrete = preset.discrete_state if discrete_state is None else bool(discrete_state)
     keys = preset.image_keys if image_keys is None else tuple(image_keys)
 
+    native_model_width = None
     if (model_dir / "config.json").is_file():
         from apxinf.policies.auto import _read_model_type
 
         model_type = _read_model_type(model_dir)
+        native_model_width = json.loads((model_dir / "config.json").read_text()).get("action_dim")
         if model_type in _PI0_FAST_TYPES | _GR00T_TYPES | {"qwen_drive"}:
             return _registered_policy_report(model_dir, preset, model_type, keys)
 
@@ -266,6 +270,27 @@ def inspect_for_robot(
         facts = report.norm.get(role)
         if facts is not None and expected is not None:
             findings.extend(_check_width(facts, preset, expected))
+    if preset.action_width is None and preset.action_dim is not None:
+        facts = report.norm.get("action")
+        if facts is not None and facts.present and facts.width is not None:
+            required = preset.action_dim
+            findings.append(Finding(
+                FAIL if facts.width < required else INFO,
+                f"{facts.check} width",
+                f"{facts.width}; preset {preset.name!r} consumes {required} action values",
+                "Use matching checkpoint statistics covering every effective action dimension.",
+            ))
+        # Architecture facts are resolved by the engine from checkpoint metadata.
+        model_width = (
+            report.layout.arch.get("action_dim", native_model_width)
+            if report.layout else native_model_width
+        )
+        if model_width is not None and model_width < preset.action_dim:
+            findings.append(Finding(
+                FAIL, "model action width",
+                f"{model_width}, but the adapter requires {preset.action_dim}",
+                "Use a checkpoint whose output covers the adapter's action layout.",
+            ))
     findings.extend(_check_cameras(preset, keys))
     findings.extend(_check_overrides(preset, action_dim=action_dim, discrete=discrete))
 

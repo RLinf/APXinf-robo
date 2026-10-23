@@ -1,7 +1,8 @@
 """Dataset recording conventions used on the inference wire.
 
 A :class:`Convention` defines camera keys in model view-slot order, the state
-key, the prompt key, and whether state is encoded into the prompt.
+key, and the prompt key. Whether state is encoded into the prompt depends on the
+checkpoint, so :class:`~apxinf_robo.embodiments.base.RobotPreset` declares it.
 
 **Why this lives in apxinf-robo and not in the engine.** A convention is a fact
 about a *client* — what a simulator, a dataset recorder, or a robot stack calls
@@ -28,7 +29,7 @@ validated against each other.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, Tuple
 
 from ..engine import require_apxinf
 
@@ -51,8 +52,7 @@ __all__ = [
 class Convention:
     """A dataset's recording convention: what the client calls things.
 
-    Everything here is a string on the network, plus the one routing decision
-    that follows from how the data was recorded. It survives a change of robot.
+    Everything here is a string on the network. It survives a change of robot.
     Nothing here knows an action width or a camera count.
     """
 
@@ -65,9 +65,6 @@ class Convention:
     #: Wire key of the task instruction. ``prompt`` is openpi's protocol-level
     #: name rather than any one dataset's, which is why it has a default here.
     prompt_key: str = "prompt"
-    #: Optional policy override for state string encoding. ``None`` leaves the
-    #: choice to the checkpoint's concrete policy.
-    discrete_state: Optional[bool] = None
 
     def __post_init__(self) -> None:
         if not self.image_keys:

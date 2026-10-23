@@ -1,10 +1,10 @@
 """Embodiment / preset machinery: pairing a body with a wire convention.
 
 A preset pairs an :class:`Embodiment` (camera/action geometry and robot
-processing) with a :class:`~apxinf_robo.conventions.base.Convention` (wire keys
-and state routing). ``image_keys`` order maps directly to model
-:data:`~apxinf.policies.base.VIEW_SLOTS`. External packages may add pairings
-with :func:`register_robot_preset`.
+processing) with a :class:`~apxinf_robo.conventions.base.Convention` (wire keys)
+and declares the checkpoint's state encoding. ``image_keys`` order maps directly
+to model :data:`~apxinf.policies.base.VIEW_SLOTS`. External packages may add
+pairings with :func:`register_robot_preset`.
 
 This module holds only the mechanism — no body and no pairing is defined here.
 Bodies live in the sibling modules; the pairing table is
@@ -59,7 +59,8 @@ class Embodiment:
     #: has to be. Distinct from :attr:`action_dim`, which is a *loading* knob
     #: saying what to trim the model down to: the G1 declares ``action_dim=None``
     #: because ``UnitreeG1EncodeActions`` owns the truncation, but its actions are
-    #: still 16 wide and its statistics must be. ``None`` skips the check.
+    #: still 16 wide and its statistics must be. ``None`` permits padding and
+    #: checks coverage of ``action_dim`` when that effective width is declared.
     action_width: Optional[int] = None
     #: Factory that loads the checkpoint and wires this robot's pre/post steps.
     builder: Callable[..., Any] = _build_generic
@@ -106,6 +107,10 @@ class RobotPreset:
     convention: Convention
     #: One-line description for ``--help`` and the served metadata.
     summary: str = ""
+    #: Whether the checkpoint encodes state into the prompt. This follows the
+    #: training config rather than the wire keys. ``None`` leaves the choice to
+    #: the checkpoint's concrete policy.
+    discrete_state: Optional[bool] = None
 
     def __post_init__(self) -> None:
         if self.convention.num_cameras != self.embodiment.num_cameras:
@@ -130,10 +135,6 @@ class RobotPreset:
     @property
     def prompt_key(self) -> str:
         return self.convention.prompt_key
-
-    @property
-    def discrete_state(self) -> Optional[bool]:
-        return self.convention.discrete_state
 
     @property
     def slots(self) -> Tuple[Tuple[str, str], ...]:

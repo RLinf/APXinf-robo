@@ -62,7 +62,7 @@ from .preflight import (
     format_findings,
     inspect_for_robot,
 )
-from .presets import FRANKA_LIBERO, UNITREE_G1, build_robot_policy
+from .presets import DUAL_FRANKA, FRANKA_LIBERO, UNITREE_G1, YAM, build_robot_policy
 
 __version__ = "0.1.0"
 
@@ -84,6 +84,8 @@ __all__ = [
     "ROBOT_ALIASES",
     "FRANKA_LIBERO",
     "UNITREE_G1",
+    "DUAL_FRANKA",
+    "YAM",
     "available_robots",
     "get_robot_preset",
     "register_robot_preset",
