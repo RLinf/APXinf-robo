@@ -191,19 +191,27 @@ The workflow follows these guides to implement and validate the model port:
 git clone --recursive https://github.com/RLinf/APXinf-robo.git
 cd APXinf-robo
 python3 -m venv .venv && source .venv/bin/activate
-pip install maturin
-CARGO_TARGET_DIR=target/wheel maturin build --release --features cuda --auditwheel skip -m apxinf/crates/apxinf-py/Cargo.toml
-pip install --force-reinstall target/wheel/wheels/apxinf_py-*.whl
-pip install -e "./apxinf/python/apxinf[serving]" --config-settings editable_mode=strict
-pip install -e ".[libero,serve]"
+python scripts/install.py --extra serve
 ```
 
 Install on Linux with an NVIDIA driver, CUDA toolkit, Rust, and `cmake`.
-Use `--features cuda` when building the binding. The `serving` extra installs
-msgpack and websockets; omit it for in-process use. Strict editable installation
-picks up edits to existing engine Python files without reinstalling. Reinstall
-after adding modules or changing dependencies, and keep its generated
-`apxinf/python/apxinf/build/__editable__.*` directory.
+The installer builds one `apxinf` wheel containing the Python frontend and native
+backend from the checked-out engine submodule, then installs it together with
+APXinf-robo into the Python environment running the command. It also removes a
+legacy `apxinf-py` distribution if present, to avoid overlapping package files.
+Use `git submodule update --init --recursive` after updating this checkout to
+select its tested engine revision.
+
+`--extra serve` adds the WebSocket server dependencies; omit it for an in-process
+policy or an RPent RPC endpoint. `--extra libero` adds LIBERO client utilities,
+not a robot selection: Franka and YAM do not need this extra. Select the robot
+with `build_robot_policy` or the server's `--robot` option.
+
+For CPU-only installation and adapter tests, use
+`python scripts/install.py --cpu-only --extra dev`. This does not enable GPU
+inference. CI runs this installation in a clean environment and exercises the
+preset, engine-loading, and action-transform contracts. Real-checkpoint GPU
+inference and robot task success require separate validation.
 
 The build queries the visible GPU for its compute capability and compiles the
 kernels for exactly that architecture, so build on the machine you deploy to;

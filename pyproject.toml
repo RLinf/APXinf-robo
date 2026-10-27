@@ -11,12 +11,12 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.24",
+    "apxinf>=0.2.0,<0.3",
 ]
 
 [project.optional-dependencies]
-# The engine itself is installed separately from the apxinf/ submodule.
-# It is deliberately NOT a pip dependency: it is a Rust/PyO3/CUDA build that has
-# to be compiled for the target machine.
+# The apxinf wheel includes its native backend. scripts/install.py builds the
+# submodule revision for platforms without a prebuilt wheel.
 #
 # `rlinf` is empty on purpose, and still worth declaring. RLinf is not on PyPI:
 # it is used from a checkout, located at run time by $RLINF (see
