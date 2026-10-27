@@ -48,9 +48,12 @@ __all__ = [
 INTERFACES = ("policy", "bare")
 
 _INSTALL_HINT = (
-    "apxinf is not importable. From an APXinf-robo checkout, run:\n"
-    "    python scripts/install.py\n"
-    "This builds and installs the engine and robot package in the current environment."
+    "apxinf is not importable. It is a git submodule of this repository, not a "
+    "pip dependency, because it is a Rust/PyO3/CUDA build that has to be "
+    "compiled for the target machine:\n"
+    "    git submodule update --init --recursive\n"
+    "    pip install -e ./apxinf/python/apxinf --config-settings editable_mode=strict\n"
+    "and build the apxinf_py extension with maturin for anything that runs a model."
 )
 
 

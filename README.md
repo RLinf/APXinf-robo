@@ -191,27 +191,22 @@ The workflow follows these guides to implement and validate the model port:
 git clone --recursive https://github.com/RLinf/APXinf-robo.git
 cd APXinf-robo
 python3 -m venv .venv && source .venv/bin/activate
-python scripts/install.py --extra serve
+just install
 ```
 
-Install on Linux with an NVIDIA driver, CUDA toolkit, Rust, and `cmake`.
-The installer builds one `apxinf` wheel containing the Python frontend and native
-backend from the checked-out engine submodule, then installs it together with
-APXinf-robo into the Python environment running the command. It also removes a
-legacy `apxinf-py` distribution if present, to avoid overlapping package files.
-Use `git submodule update --init --recursive` after updating this checkout to
-select its tested engine revision.
+Install on Linux with an NVIDIA driver, CUDA toolkit, Rust, `cmake`, and
+[just](https://just.systems/man/en/packages.html). `just install` builds the
+native backend and installs it, the engine Python frontend, and APXinf-robo into
+the active Python environment. The Python packages use editable installs;
+rerun after adding engine modules or changing dependencies.
 
-`--extra serve` adds the WebSocket server dependencies; omit it for an in-process
-policy or an RPent RPC endpoint. `--extra libero` adds LIBERO client utilities,
-not a robot selection: Franka and YAM do not need this extra. Select the robot
-with `build_robot_policy` or the server's `--robot` option.
+For the OpenPI WebSocket server, use `just install serve`. Extras can be
+combined, for example `just install 'libero,serve'` for LIBERO client utilities
+and the server. The RPent RPC endpoint needs neither extra. These extras select
+dependencies, not robot presets.
 
-For CPU-only installation and adapter tests, use
-`python scripts/install.py --cpu-only --extra dev`. This does not enable GPU
-inference. CI runs this installation in a clean environment and exercises the
-preset, engine-loading, and action-transform contracts. Real-checkpoint GPU
-inference and robot task success require separate validation.
+For CPU-only installation and adapter tests, use `just install dev ''`.
+This omits CUDA support and cannot run GPU inference.
 
 The build queries the visible GPU for its compute capability and compiles the
 kernels for exactly that architecture, so build on the machine you deploy to;
