@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run one Qwen-Drive scene through Robo's model-agnostic L2 loader.
 
-The input directory follows ApxInf's Qwen-Drive benchmark fixture format:
-``scenes.json``, referenced image ``.npy`` files, and ``initial-noise.npy``.
+The optional real-scene input directory contains ``scenes.json``, referenced
+image ``.npy`` files, and ``initial-noise.npy``.
 """
 
 from __future__ import annotations

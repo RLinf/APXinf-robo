@@ -56,6 +56,7 @@ from ..envs.libero import (
     libero_gr00t_state,
     libero_images,
     libero_state,
+    load_libero_init_states,
     make_env,
 )
 
@@ -860,7 +861,7 @@ def main(argv=None) -> None:
                     print(f"{name} task {task_id}: already complete", flush=True)
                     continue
                 print(f"{name} task {task_id}: pending trials {pending}", flush=True)
-                initial_states = suite.get_task_init_states(task_id)
+                initial_states = load_libero_init_states(suite, task_id)
                 env = make_env(task, args.seed)
                 try:
                     for trial_id in pending:
