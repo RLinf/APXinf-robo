@@ -191,19 +191,22 @@ The workflow follows these guides to implement and validate the model port:
 git clone --recursive https://github.com/RLinf/APXinf-robo.git
 cd APXinf-robo
 python3 -m venv .venv && source .venv/bin/activate
-pip install maturin
-CARGO_TARGET_DIR=target/wheel maturin build --release --features cuda --auditwheel skip -m apxinf/crates/apxinf-py/Cargo.toml
-pip install --force-reinstall target/wheel/wheels/apxinf_py-*.whl
-pip install -e "./apxinf/python/apxinf[serving]" --config-settings editable_mode=strict
-pip install -e ".[libero,serve]"
+just install
 ```
 
-Install on Linux with an NVIDIA driver, CUDA toolkit, Rust, and `cmake`.
-Use `--features cuda` when building the binding. The `serving` extra installs
-msgpack and websockets; omit it for in-process use. Strict editable installation
-picks up edits to existing engine Python files without reinstalling. Reinstall
-after adding modules or changing dependencies, and keep its generated
-`apxinf/python/apxinf/build/__editable__.*` directory.
+Install on Linux with an NVIDIA driver, CUDA toolkit, Rust, `cmake`, and
+[just](https://just.systems/man/en/packages.html). `just install` builds the
+native backend and installs it, the engine Python frontend, and APXinf-robo into
+the active Python environment. The Python packages use editable installs;
+rerun after adding engine modules or changing dependencies.
+
+For the OpenPI WebSocket server, use `just install serve`. Extras can be
+combined, for example `just install 'libero,serve'` for LIBERO client utilities
+and the server. The RPent RPC endpoint needs neither extra. These extras select
+dependencies, not robot presets.
+
+For CPU-only installation and adapter tests, use `just install dev ''`.
+This omits CUDA support and cannot run GPU inference.
 
 The build queries the visible GPU for its compute capability and compiles the
 kernels for exactly that architecture, so build on the machine you deploy to;
