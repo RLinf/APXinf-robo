@@ -1,0 +1,42 @@
+# Exact Python packages for in-process LIBERO evaluation on the S600 board
+# (Ubuntu 24.04, Python 3.12, aarch64). Installed by
+# `deploy.sh --with-libero` into the same virtual environment as apx-drobotics.
+#
+# Only what the evaluation path needs. LIBERO's own requirements.txt also pins
+# wandb, transformers, thop, einops and a 2022 matplotlib; those belong to its
+# training code and are not installed here.
+#
+# Versions below were resolved and run on the board on 2026-11-10.
+#
+# mujoco must stay on 3.x: 2.3.7 has no cp312 wheel, and building it from source
+# makes CMake fetch eight repositories from GitHub, which the board's network
+# does not reliably reach. robosuite only requires mujoco>=2.3.0.
+mujoco==3.3.7
+robosuite==1.4.0
+bddl==1.0.1
+scipy==1.17.1
+numba==0.68.1
+llvmlite==0.50.0
+opencv-python==4.11.0.86
+matplotlib==3.11.2
+h5py==3.16.0
+gym==0.26.2
+imageio==2.38.1
+easydict==1.14
+cloudpickle==3.1.2
+pyyaml==6.0.3
+tqdm==4.70.1
+termcolor==3.3.0
+future==1.0.0
+
+# torch is installed separately by deploy.sh, from the CPU index
+# (https://download.pytorch.org/whl/cpu). PyPI's aarch64 build is a CUDA build
+# and fails at import with "libcudart.so.13: cannot open shared object file";
+# LIBERO only uses torch.load to read the initial states. The version is pinned
+# here, and deploy.sh reads it back out of this file.
+torch==2.5.1
+
+# numpy and pillow are pinned by requirements-board.txt: the letterbox resize
+# moved from the PC to the board and has to stay byte for byte the same, so the
+# LIBERO install must not disturb them. deploy.sh passes both files to pip with
+# the base file as a constraint.

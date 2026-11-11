@@ -40,6 +40,7 @@ __all__ = [
     "policy_from_random",
     "resolve_tactics",
     "websocket_server",
+    "apxinf_available",
     "require_apxinf",
     "INTERFACES",
 ]
@@ -100,6 +101,15 @@ def require_apxinf():
             )
         raise ImportError(_INSTALL_HINT)
     return apxinf
+
+
+def apxinf_available() -> bool:
+    """Whether ApxInf can be imported here. On the S600 board it cannot."""
+    try:
+        require_apxinf()
+    except ImportError:
+        return False
+    return True
 
 
 def load_policy(model_dir, **kwargs):

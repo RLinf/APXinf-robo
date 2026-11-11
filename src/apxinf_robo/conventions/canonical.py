@@ -8,18 +8,16 @@ canonical spelling and leaves camera routing to the bridge.
 
 from __future__ import annotations
 
-from ..engine import require_apxinf
+from ..protocol import CANONICAL_IMAGE_KEYS, CANONICAL_PROMPT_KEY, CANONICAL_STATE_KEY
 from .base import Convention, register_convention
 
 __all__ = ["CANONICAL"]
 
-_ENGINE_KEYS = require_apxinf().policies.base
-
 CANONICAL = register_convention(
     Convention(
         name="canonical",
-        image_keys=_ENGINE_KEYS.CANONICAL_IMAGE_KEYS,
-        state_key=_ENGINE_KEYS.CANONICAL_STATE_KEY,
-        prompt_key=_ENGINE_KEYS.CANONICAL_PROMPT_KEY,
+        image_keys=CANONICAL_IMAGE_KEYS,
+        state_key=CANONICAL_STATE_KEY,
+        prompt_key=CANONICAL_PROMPT_KEY,
     )
 )

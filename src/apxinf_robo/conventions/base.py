@@ -14,7 +14,7 @@ carrying an ``image_keys`` field forever.
 
 What a convention may depend on:
 
-* :data:`~apxinf.policies.base.VIEW_SLOTS` — model vocabulary, needed to say
+* :data:`~apxinf_robo.protocol.VIEW_SLOTS` — model vocabulary, needed to say
   which slot each camera key fills. That is a one-way read of a naming table; no
   policy class is imported and no model is loaded.
 
@@ -31,13 +31,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, Tuple
 
-from ..engine import require_apxinf
-
-# Not a plain ``from apxinf...`` import: the engine submodule directory is itself
-# named ``apxinf``, so from the repository root an *uninstalled* engine imports
-# as an empty namespace package rather than raising, and the failure resurfaces
-# here as a missing submodule. The guard turns that back into the install hint.
-VIEW_SLOTS = require_apxinf().policies.base.VIEW_SLOTS
+from ..protocol import VIEW_SLOTS
 
 __all__ = [
     "Convention",
