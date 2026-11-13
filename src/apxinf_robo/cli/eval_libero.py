@@ -7,14 +7,16 @@ One evaluator for every way of reaching the model and every LIBERO suite:
   unmodified ``openpi_client``.
 * ``--backend in-process`` builds the policy in this process via
   :func:`apxinf_robo.engine.load_policy` and calls ``policy.infer`` directly --
-  no socket, no server, no subprocess.
+  no socket, no server, no subprocess. ``--engine drobotics`` builds the S600 policy
+  instead, on the board.
 
 Both transports drive the *same* rollout loop through a small :class:`Backend`
 abstraction, so the LIBERO harness (rollout constants, the resumable fsync'd
 JSONL ledger, timing split) is shared verbatim. Native observation conversion
 lives in :mod:`apxinf_robo.envs.libero` so evaluation and calibration cannot
 silently diverge on camera orientation or robot-state layout. Model-specific
-resize remains inside the selected policy.
+resize remains inside the selected policy, whichever engine runs it, so the evaluator
+sends every engine the same oriented frames.
 
 ``--suite`` selects one LIBERO task suite (``libero_10`` / ``libero_90`` /
 ``libero_spatial`` / ``libero_object`` / ``libero_goal``) or ``all``. The ledger
@@ -34,6 +36,10 @@ family needs a LIBERO conversion only when its contract differs from these.
     apxinf-robo eval-libero --backend in-process --model-dir /path/ckpt \
         --precision bf16 --action-dim 7 --suite libero_10 \
         --results-jsonl r.jsonl --summary-json s.json
+
+    # websocket, with `apxinf-robo serve --engine drobotics` running on an S600 board
+    apxinf-robo eval-libero --backend websocket --host <board> --precision w8 \
+        --suite libero_10 --results-jsonl r.jsonl --summary-json s.json
 """
 
 from __future__ import annotations
@@ -41,7 +47,9 @@ from __future__ import annotations
 import argparse
 import collections
 import functools
+import hashlib
 import json
+import logging
 import os
 import pathlib
 import sys
@@ -50,6 +58,8 @@ import traceback
 from typing import Optional, Protocol, Tuple
 
 import numpy as np
+
+from ._engine_options import explicit_flags, refusal
 
 from ..envs.libero import (
     libero_gr00t_action,
@@ -81,6 +91,7 @@ def _two_finger_state(observation):
 _LIBERO_STATES = {
     "pi0_fast": _two_finger_state,
     "pi0fast": _two_finger_state,
+    "pi05_drobotics_w8": _two_finger_state,
     "gr00t": libero_gr00t_state,
     "gr00tn1d7": libero_gr00t_state,
     "Gr00tN1d7": libero_gr00t_state,
@@ -118,12 +129,80 @@ def libero_convention():
 # --- LIBERO harness: resumable ledger + summary aggregation -------------------
 
 
-def completed_runs(path: pathlib.Path, precision: str) -> dict[LedgerKey, dict]:
+#: In-process options that only ApxInf can honour; ``--engine drobotics`` refuses them
+#: instead of dropping them. ``--warm-start`` is here because it feeds the model noise,
+#: which the S600 runtime samples for itself.
+_APXINF_ONLY = (
+    "model_type", "checkpoint", "device", "calibration", "tactics", "tokenizer",
+    "norm_stats", "norm_key", "num_views", "num_flow_steps", "flow_start_time",
+    "action_horizon", "model_seed", "warm_start",
+)
+
+#: Metadata that identifies a contract-pinned engine, recorded in the run identity.
+_CONTRACT_IDENTITY = (
+    "engine", "runtime", "sdk_version", "model_type", "contract_id", "contract_sha256",
+    # The contract hash covers the model files, not the code that drives them: a rebuilt
+    # worker or a newer apx_drobotics must not resume an older ledger.
+    "worker_sha256", "apx_drobotics_version",
+)
+
+
+def run_identity(args: argparse.Namespace, metadata: Optional[dict] = None) -> dict:
+    """What a ledger row's result depends on, beyond precision.
+
+    A resumed evaluation must not mix rows produced by different settings into
+    one success rate. Every row records this, and :func:`completed_runs` refuses
+    a ledger whose rows disagree with the current run. An engine that publishes a
+    ``contract_sha256`` in its ``metadata`` is pinned by it: the hash stands for
+    the SDK, model files and pre/post-processing, so it covers the model checksums.
+    """
+    identity = {
+        "replan_steps": args.replan_steps,
+        "max_steps": args.max_steps,
+        "seed": args.seed,
+        "settle_gripper": args.settle_gripper,
+        "wait_steps": WAIT_STEPS,
+    }
+    if metadata and "contract_sha256" in metadata:
+        identity.update((key, metadata.get(key)) for key in _CONTRACT_IDENTITY)
+    return identity
+
+
+def _check_identity(item: dict, identity: dict, line_number: int) -> None:
+    recorded = item.get("identity")
+    if recorded is None:
+        # Rows written before identities existed. They are accepted for runs
+        # without a contract, so older ledgers stay resumable.
+        if "contract_sha256" in identity:
+            raise ValueError(
+                f"ledger line {line_number} has no run identity, so it cannot be "
+                "shown to match the engine's contract; use a new --results-jsonl"
+            )
+        return
+    if recorded != identity:
+        changed = sorted(
+            key for key in set(recorded) | set(identity)
+            if recorded.get(key) != identity.get(key)
+        )
+        details = ", ".join(
+            f"{key}: ledger {recorded.get(key)!r}, now {identity.get(key)!r}" for key in changed
+        )
+        raise ValueError(
+            f"ledger line {line_number} was written by a different run ({details}); "
+            "use a new --results-jsonl"
+        )
+
+
+def completed_runs(
+    path: pathlib.Path, precision: str, identity: Optional[dict] = None
+) -> dict[LedgerKey, dict]:
     """Load the ``status == "completed"`` rows from a resumable ledger.
 
     Keyed by ``(suite, task_id, trial_id)`` so one ledger can hold several suites
     without ``task_id=0`` colliding across them. The precision guard rejects a
-    ledger written at a different precision than the one requested now.
+    ledger written at a different precision than the one requested now, and,
+    when ``identity`` is given, the identity guard rejects rows written with
+    other settings (see :func:`run_identity`).
     """
     result: dict[LedgerKey, dict] = {}
     if not path.exists():
@@ -138,6 +217,8 @@ def completed_runs(path: pathlib.Path, precision: str) -> dict[LedgerKey, dict]:
                 f"ledger precision is {item_precision!r}, requested {precision!r} "
                 f"at line {line_number}"
             )
+        if identity is not None:
+            _check_identity(item, identity, line_number)
         if item.get("status") == "completed":
             key: LedgerKey = (
                 str(item["suite"]),
@@ -164,6 +245,7 @@ def write_summary(
     expected_keys: set[LedgerKey],
     precision: str,
     transport: str,
+    identity: Optional[dict] = None,
 ) -> None:
     """Write the aggregate summary, grouped per-suite then per-task."""
     per_suite: dict[str, dict] = {}
@@ -197,6 +279,7 @@ def write_summary(
         "suites": sorted({key[0] for key in expected_keys}),
         "transport": transport,
         "precision": precision,
+        "identity": identity,
         "expected_runs": len(expected_keys),
         "completed_runs": len(rows),
         "missing_runs": [
@@ -340,6 +423,20 @@ class WebsocketBackend:
                 entries.append(host)
             os.environ[variable] = ",".join(entries)
         self._client = websocket_client_policy.WebsocketClientPolicy(host, port)
+        # LIBERO scene initialization can monopolize the client process for longer
+        # than websockets' 20 s Pong deadline. Keep sending Pings, but do not mistake
+        # a slow simulator reset for a dead server. openpi_client offers no public
+        # setting for this, so it reaches a private attribute: guard it, and say so
+        # if a newer client no longer has it rather than failing on a missing name
+        # or silently running with the default deadline.
+        connection = getattr(self._client, "_ws", None)
+        if connection is not None and hasattr(connection, "ping_timeout"):
+            connection.ping_timeout = None
+        else:
+            logging.warning(
+                "openpi_client no longer exposes _ws.ping_timeout; a LIBERO reset that "
+                "blocks this process for over 20 s may drop the connection"
+            )
         self.metadata = self._client.get_server_metadata()
         self.model_type = self.metadata.get("model_type", "pi05")
         actual_precision = self.metadata.get("precision")
@@ -390,10 +487,29 @@ class InProcessBackend:
 
     Model-agnostic: :func:`apxinf_robo.engine.load_policy` dispatches on the
     checkpoint's ``config.json`` model type (overridable with ``--model-type``),
-    so a future ``GrootPolicy`` runs here with no change to this file.
+    so a future ``GrootPolicy`` runs here with no change to this file. ``--engine
+    drobotics`` builds the S600 policy, which has the same shape.
     """
 
     def __init__(self, args: argparse.Namespace) -> None:
+        if args.engine == "drobotics":
+            from ..presets import build_robot_policy
+
+            # parse_args has already refused the options this engine cannot honour.
+            # action_dim and discrete_state are passed on instead: the contract fixes
+            # both, so a value that disagrees with it is an error there, not a setting.
+            self._policy = build_robot_policy(
+                LIBERO_PRESET,
+                args.model_dir,
+                engine="drobotics",
+                precision=args.precision,
+                action_dim=args.action_dim,
+                discrete_state=args.discrete_state,
+            )
+            self.metadata = dict(self._policy.metadata)
+            self.model_type = self.metadata["model_type"]
+            return
+
         # Lazy: loading the engine pulls in the policy stack; websocket-only
         # users never pay for it.
         from ..engine import load_policy
@@ -438,10 +554,12 @@ class InProcessBackend:
 
     def infer(
         self, base, wrist, state, prompt, noise=None
-    ) -> Tuple[np.ndarray, np.ndarray, dict]:
+    ) -> Tuple[np.ndarray, Optional[np.ndarray], dict]:
         result = self._policy.infer(_observation(base, wrist, state, prompt), noise=noise)
         actions = np.asarray(result["actions"], dtype=np.float32)
-        normalized = np.asarray(result["normalized_actions"], dtype=np.float32)
+        normalized = result.get("normalized_actions")
+        if normalized is not None:
+            normalized = np.asarray(normalized, dtype=np.float32)
         timing = result.get("timing", {}) or {}
         model_ms = float(timing.get("model_ms", 0.0))
         total_ms = float(timing.get("total_ms", model_ms))
@@ -480,6 +598,7 @@ def run_episode(
     replan_steps: int = REPLAN_STEPS,
     settle_gripper: float = -1.0,
     max_steps: int | None = None,
+    trace_path: pathlib.Path | None = None,
 ) -> dict:
     model_type = getattr(backend, "model_type", "pi05")
     episode_started = time.perf_counter()
@@ -488,6 +607,29 @@ def run_episode(
     dummy_action = [0.0] * 6 + [settle_gripper]
     for _ in range(WAIT_STEPS):
         observation, _, _, _ = env.step(dummy_action)
+
+    def digest(array) -> str:
+        return hashlib.sha256(np.ascontiguousarray(array).tobytes()).hexdigest()
+
+    trace = None
+    if trace_path is not None:
+        trace = {
+            "schema": "apxinf.libero-rollout-trace.v1",
+            "suite": suite, "task_id": task_id, "trial_id": trial_id,
+            "seed": seed, "prompt": prompt,
+            "initial_state": np.asarray(initial_state).tolist(),
+            "initial_state_sha256": digest(initial_state),
+            "settled_observation": {
+                "agentview_image_sha256": digest(observation["agentview_image"]),
+                "wrist_image_sha256": digest(observation["robot0_eye_in_hand_image"]),
+                "eef_pos": np.asarray(observation["robot0_eef_pos"]).tolist(),
+                "eef_quat": np.asarray(observation["robot0_eef_quat"]).tolist(),
+                "gripper_qpos": np.asarray(observation["robot0_gripper_qpos"]).tolist(),
+            },
+            "wait_steps": WAIT_STEPS, "settle_gripper": settle_gripper,
+            "replan_steps": replan_steps,
+            "inferences": [], "executed_actions": [],
+        }
 
     action_plan: collections.deque[np.ndarray] = collections.deque()
     success = False
@@ -584,15 +726,37 @@ def run_episode(
             )
             if first_action_checksum is None:
                 first_action_checksum = float(np.abs(actions).sum())
+            if trace is not None:
+                trace["inferences"].append({
+                    "at_action_step": action_steps,
+                    "base_sha256": digest(images[0]),
+                    "wrist_sha256": digest(images[1]),
+                    "state": np.asarray(state).tolist() if not isinstance(state, dict) else
+                        {key: np.asarray(value).tolist() for key, value in state.items()},
+                    "actions": actions.tolist(),
+                    "model_seconds": segment_model,
+                    "server_processor_seconds": segment_processor,
+                    "round_trip_seconds": round_trip_seconds,
+                })
             action_plan.extend(actions[:replan_steps])
             replans += 1
 
         action = action_plan.popleft()
         observation, _, done, _ = env.step(action.tolist())
         action_steps += 1
+        if trace is not None:
+            trace["executed_actions"].append(action.tolist())
         if done:
             success = True
             break
+
+    if trace is not None:
+        trace["success"] = success
+        trace["action_steps"] = action_steps
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = trace_path.with_suffix(trace_path.suffix + ".tmp")
+        temporary.write_text(json.dumps(trace, sort_keys=True) + "\n")
+        os.replace(temporary, trace_path)
 
     return {
         "status": "completed",
@@ -617,6 +781,7 @@ def run_episode(
         "transport": transport,
         "image_input": "openpi_uint8_hwc",
         "seed": seed,
+        **({"trace_path": str(trace_path)} if trace_path is not None else {}),
     }
 
 
@@ -624,6 +789,8 @@ def run_episode(
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from ..presets import ENGINES
+
     parser = argparse.ArgumentParser(
         prog="apxinf-robo eval-libero",
         description=__doc__,
@@ -633,7 +800,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--backend", choices=("websocket", "in-process"), required=True,
         help="reach the model through a running server, or build it in-process",
     )
-    parser.add_argument("--precision", choices=("fp8", "bf16", "int8"), required=True)
+    parser.add_argument("--precision", choices=("fp8", "bf16", "int8", "w8"), required=True)
     parser.add_argument("--suite", default="libero_10", choices=(*ALL_SUITES, "all"))
     parser.add_argument(
         "--tasks", default="all",
@@ -662,16 +829,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-attempts", type=int, default=3)
     parser.add_argument("--results-jsonl", required=True, type=pathlib.Path)
     parser.add_argument("--summary-json", required=True, type=pathlib.Path)
+    parser.add_argument(
+        "--trace-dir", type=pathlib.Path,
+        help="save initial state, observation hashes, each predicted chunk, executed actions and timings",
+    )
 
     websocket = parser.add_argument_group("websocket backend")
     websocket.add_argument("--host", default="127.0.0.1")
     websocket.add_argument("--port", type=int, default=8000)
 
     in_process = parser.add_argument_group("in-process backend")
-    in_process.add_argument("--model-dir", type=pathlib.Path)
+    in_process.add_argument(
+        "--engine", choices=ENGINES, default="apxinf",
+        help="what runs the model in this process; drobotics needs an S600 board. With "
+        "--backend websocket the server decides.",
+    )
+    in_process.add_argument(
+        "--model-dir", type=pathlib.Path,
+        help="checkpoint directory; for --engine drobotics, the SDK's oellm_runtime_s600 directory",
+    )
     in_process.add_argument("--model-type", default=None, help="override config.json model type")
     in_process.add_argument("--checkpoint", type=pathlib.Path)
-    in_process.add_argument("--device", default="cuda:0")
+    in_process.add_argument("--device", default=None, help="ApxInf only (default: cuda:0)")
     in_process.add_argument("--calibration", type=pathlib.Path)
     in_process.add_argument("--tactics", type=pathlib.Path, help=argparse.SUPPRESS)
     in_process.add_argument("--tokenizer", type=pathlib.Path,
@@ -681,7 +860,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicit OpenPI-style norm_stats.json; overrides checkpoint normalization",
     )
     in_process.add_argument("--norm-key")
-    in_process.add_argument("--action-dim", type=int, default=7, help="0 keeps the full vector")
+    in_process.add_argument(
+        "--action-dim", type=int, default=None,
+        help="deployable action width (default: 7); 0 keeps the full vector",
+    )
     in_process.add_argument(
         "--num-views",
         type=int,
@@ -734,8 +916,26 @@ def build_parser() -> argparse.ArgumentParser:
 def parse_args(argv=None) -> argparse.Namespace:
     parser = build_parser()
     args = parser.parse_args(argv)
-    if args.backend == "in-process" and args.model_dir is None:
-        parser.error("--backend in-process requires --model-dir")
+    if args.engine == "drobotics":
+        if args.backend != "in-process":
+            parser.error("--engine drobotics applies to --backend in-process; "
+                         "with --backend websocket the server decides")
+        if args.precision != "w8":
+            parser.error("--engine drobotics requires --precision w8")
+        used = explicit_flags(args, _APXINF_ONLY)
+        if used:
+            parser.error(refusal(used, "drobotics"))
+    elif args.backend == "in-process":
+        if args.model_dir is None:
+            parser.error("--backend in-process requires --model-dir")
+        if args.precision == "w8":
+            parser.error("--precision w8 is the S600 model; pass --engine drobotics")
+    if args.engine != "drobotics":
+        # Defaults that must not look "given" to the check above; see _engine_options.
+        if args.device is None:
+            args.device = "cuda:0"
+        if args.action_dim is None:
+            args.action_dim = 7
     if args.norm_stats is not None:
         if args.backend == "websocket":
             parser.error(
@@ -833,20 +1033,22 @@ def main(argv=None) -> None:
         for task_id in task_ids
         for trial_id in range(args.trials_per_task)
     }
-    ledger = completed_runs(args.results_jsonl, args.precision)
-    unexpected = set(ledger) - expected_keys
-    if unexpected:
-        raise ValueError(
-            f"ledger contains runs outside requested scope: {sorted(unexpected)}"
-        )
-    write_summary(args.summary_json, ledger, expected_keys, args.precision, transport)
-
+    # The backend comes first: the run identity includes what the engine publishes.
     backend = build_backend(args)
-    if args.warm_start and backend.model_type != "pi05":
-        backend.close()
-        raise ValueError("--warm-start is currently defined for PI0.5 flow policies only")
-    print(f"backend={args.backend} metadata={backend.metadata}", flush=True)
     try:
+        if args.warm_start and backend.model_type != "pi05":
+            raise ValueError("--warm-start is currently defined for PI0.5 flow policies only")
+        identity = run_identity(args, backend.metadata)
+        ledger = completed_runs(args.results_jsonl, args.precision, identity)
+        unexpected = set(ledger) - expected_keys
+        if unexpected:
+            raise ValueError(
+                f"ledger contains runs outside requested scope: {sorted(unexpected)}"
+            )
+        write_summary(
+            args.summary_json, ledger, expected_keys, args.precision, transport, identity
+        )
+        print(f"backend={args.backend} metadata={backend.metadata}", flush=True)
         for name, suite in suites.items():
             for task_id in task_ids_by_suite[name]:
                 task = suite.get_task(task_id)
@@ -881,14 +1083,17 @@ def main(argv=None) -> None:
                                     args.replan_steps,
                                     args.settle_gripper,
                                     args.max_steps,
+                                    (args.trace_dir / name / f"task-{task_id}-trial-{trial_id}-attempt-{attempt}.json"
+                                     if args.trace_dir is not None else None),
                                 )
                                 record["attempt"] = attempt
                                 record["precision"] = args.precision
+                                record["identity"] = identity
                                 append_record(args.results_jsonl, record)
                                 ledger[(name, task_id, trial_id)] = record
                                 write_summary(
                                     args.summary_json, ledger, expected_keys,
-                                    args.precision, transport,
+                                    args.precision, transport, identity,
                                 )
                                 print(
                                     f"{name} task={task_id} trial={trial_id} "
@@ -906,6 +1111,7 @@ def main(argv=None) -> None:
                                     "trial_id": trial_id,
                                     "attempt": attempt,
                                     "precision": args.precision,
+                                    "identity": identity,
                                     "transport": transport,
                                     "error": repr(error),
                                     "traceback": traceback.format_exc(),
@@ -925,7 +1131,9 @@ def main(argv=None) -> None:
     finally:
         backend.close()
 
-    write_summary(args.summary_json, ledger, expected_keys, args.precision, transport)
+    write_summary(
+        args.summary_json, ledger, expected_keys, args.precision, transport, identity
+    )
     missing = expected_keys - set(ledger)
     if missing:
         raise RuntimeError(f"evaluation incomplete; missing {sorted(missing)}")

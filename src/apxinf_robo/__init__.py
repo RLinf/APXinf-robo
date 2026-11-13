@@ -1,4 +1,4 @@
-"""apxinf-robo: the robot-facing layer over the ApxInf inference engine.
+"""apxinf-robo: the robot-facing layer over ApxInf and the S600.
 
 ApxInf is an inference engine. It knows checkpoints, tensors, and the numeric
 chain between them. It deliberately does not know that a Unitree G1 has sixteen
@@ -23,8 +23,12 @@ That is this package. It supplies four separable things:
 :mod:`~apxinf_robo.envs`
     Evaluation-environment glue (LIBERO, robosuite, IsaacLab).
 
-Everything reaches the engine through :mod:`apxinf_robo.engine`, the one module
-that imports ``apxinf``.
+Everything reaches an engine through one module: :mod:`apxinf_robo.engine` for
+ApxInf, and :mod:`apxinf_robo.engine_drobotics` for the D-Robotics S600 (``apx_drobotics``).
+Both give a policy of the :class:`~apxinf_robo.protocol.Policy` shape, so the layers
+above do not depend on either, and this package imports without ApxInf, as it must on
+the S600 board. There, only what ApxInf provides is missing: the bodies that need its
+processor chain, and checkpoint preflight. Touching those raises its install hint.
 
     >>> from apxinf_robo import build_robot_policy, check_checkpoint, format_findings
     >>> print(format_findings(check_checkpoint("/ckpt/pi05_g1", "unitree_g1")))  # doctest: +SKIP
@@ -33,7 +37,7 @@ that imports ``apxinf``.
 
 from __future__ import annotations
 
-from . import conventions, embodiments
+from . import conventions, embodiments, protocol
 from .conventions import (
     CONVENTIONS,
     Convention,
@@ -48,21 +52,54 @@ from .embodiments import (
     Embodiment,
     RobotPreset,
     available_robots,
-    build_unitree_g1_policy,
     get_robot_preset,
     register_robot_preset,
 )
-from .engine import ApxInfEngine, load_bare_model, load_policy, websocket_server
-from .preflight import (
-    FAIL,
-    INFO,
-    WARN,
-    Finding,
-    check_checkpoint,
-    format_findings,
-    inspect_for_robot,
+from .engine import ApxInfEngine, apxinf_available, require_apxinf
+from .presets import ENGINES, FRANKA_LIBERO, build_robot_policy
+from .protocol import Policy
+
+#: Exports that exist only where ApxInf does. ``load_policy``, ``load_bare_model`` and
+#: ``websocket_server`` are ApxInf's implementations, not an engine-neutral facade, so
+#: they are not offered where ApxInf is absent; use ``build_robot_policy`` (which takes
+#: ``engine=``) or ``apxinf_robo.engine_drobotics`` there.
+_APXINF_NAMES = (
+    "load_policy",
+    "load_bare_model",
+    "websocket_server",
+    "UNITREE_G1",
+    "DUAL_FRANKA",
+    "YAM",
+    "build_unitree_g1_policy",
+    "FAIL",
+    "WARN",
+    "INFO",
+    "Finding",
+    "check_checkpoint",
+    "inspect_for_robot",
+    "format_findings",
 )
-from .presets import DUAL_FRANKA, FRANKA_LIBERO, UNITREE_G1, YAM, build_robot_policy
+
+if apxinf_available():
+    from .embodiments import build_unitree_g1_policy
+    from .engine import load_bare_model, load_policy, websocket_server
+    from .preflight import (
+        FAIL,
+        INFO,
+        WARN,
+        Finding,
+        check_checkpoint,
+        format_findings,
+        inspect_for_robot,
+    )
+    from .presets import DUAL_FRANKA, UNITREE_G1, YAM
+else:
+
+    def __getattr__(name: str):
+        if name in _APXINF_NAMES:
+            require_apxinf()
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __version__ = "0.1.0"
 
@@ -70,6 +107,7 @@ __all__ = [
     # sub-packages
     "conventions",
     "embodiments",
+    "protocol",
     # conventions
     "Convention",
     "CONVENTIONS",
@@ -83,26 +121,16 @@ __all__ = [
     "ROBOT_PRESETS",
     "ROBOT_ALIASES",
     "FRANKA_LIBERO",
-    "UNITREE_G1",
-    "DUAL_FRANKA",
-    "YAM",
     "available_robots",
     "get_robot_preset",
     "register_robot_preset",
     "build_robot_policy",
-    "build_unitree_g1_policy",
     # engine access
+    "ENGINES",
+    "Policy",
     "ApxInfEngine",
-    "load_policy",
-    "load_bare_model",
-    "websocket_server",
-    # preflight
-    "FAIL",
-    "WARN",
-    "INFO",
-    "Finding",
-    "check_checkpoint",
-    "inspect_for_robot",
-    "format_findings",
+    "apxinf_available",
+    # needs ApxInf
+    *(_APXINF_NAMES if apxinf_available() else ()),
     "__version__",
 ]

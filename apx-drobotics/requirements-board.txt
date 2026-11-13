@@ -1,0 +1,8 @@
+# Exact Python packages for the S600 board (Ubuntu 24.04, Python 3.12, aarch64).
+# scripts/deploy.sh installs them into a virtual environment. Pillow matches the
+# PC that produced the stage 6 baseline, because the letterbox resize moved from
+# the PC to the board and has to stay byte for byte the same.
+numpy==1.26.4
+pillow==12.3.0
+msgpack==1.2.4
+websockets==16.1.1

@@ -13,8 +13,6 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional, Sequence
 
-from apxinf.policies.base import Policy
-
 from . import conventions
 from .embodiments.base import (
     ROBOT_ALIASES,
@@ -25,16 +23,14 @@ from .embodiments.base import (
     get_robot_preset,
     register_robot_preset,
 )
-from .embodiments.dual_franka import DUAL_FRANKA_BODY
 from .embodiments.franka import FRANKA
-from .embodiments.unitree_g1 import UNITREE_G1_BODY
-from .embodiments.yam import YAM_BODY
+from .engine import apxinf_available, require_apxinf
+from .protocol import Policy
 
 __all__ = [
+    "ENGINES",
     "FRANKA_LIBERO",
-    "UNITREE_G1",
-    "DUAL_FRANKA",
-    "YAM",
+    *(("UNITREE_G1", "DUAL_FRANKA", "YAM") if apxinf_available() else ()),
     "ROBOT_PRESETS",
     "ROBOT_ALIASES",
     "available_robots",
@@ -42,6 +38,9 @@ __all__ = [
     "register_robot_preset",
     "build_robot_policy",
 ]
+
+#: Accepted ``engine=`` values for :func:`build_robot_policy`.
+ENGINES = ("apxinf", "drobotics")
 
 #: --- deployable pairings -----------------------------------------------------
 
@@ -58,46 +57,70 @@ FRANKA_LIBERO = register_robot_preset(
     aliases=("libero",),
 )
 
-#: Unitree G1 under its native wire convention, with state discretized into the
-#: prompt.
-UNITREE_G1 = register_robot_preset(
-    RobotPreset(
-        name="unitree_g1",
-        embodiment=UNITREE_G1_BODY,
-        convention=conventions.UNITREE_G1,
-        summary="Unitree G1: 3 cameras, 16-DoF state, delta joint actions, 32->16 encode",
-        discrete_state=True,
-    )
-)
+if apxinf_available():
+    from .embodiments.dual_franka import DUAL_FRANKA_BODY
+    from .embodiments.unitree_g1 import UNITREE_G1_BODY
+    from .embodiments.yam import YAM_BODY
 
-#: RLinf ``pi05_dualfranka_tcp_rot6d``: slots hold base, left wrist, right wrist.
-#: The checkpoint omits state tokens; state is still needed to restore absolute
-#: body-frame actions.
-DUAL_FRANKA = register_robot_preset(
-    RobotPreset(
-        name="dual_franka_tcp_rot6d",
-        embodiment=DUAL_FRANKA_BODY,
-        convention=conventions.CANONICAL,
-        summary="Dual Franka: body-frame delta checkpoint, absolute TCP rot6d output",
-        discrete_state=False,
-    ),
-)
-#: RLinf ``pi05_yam_joint``: slots hold top, left, right.
-YAM = register_robot_preset(
-    RobotPreset(
-        name="yam_joint",
-        embodiment=YAM_BODY,
-        convention=conventions.CANONICAL,
-        summary="Dual YAM: delta-joint checkpoint, absolute qpos14 output",
-        discrete_state=True,
-    ),
-)
+    #: Unitree G1 under its native wire convention, with state discretized into the
+    #: prompt.
+    UNITREE_G1 = register_robot_preset(
+        RobotPreset(
+            name="unitree_g1",
+            embodiment=UNITREE_G1_BODY,
+            convention=conventions.UNITREE_G1,
+            summary="Unitree G1: 3 cameras, 16-DoF state, delta joint actions, 32->16 encode",
+            discrete_state=True,
+        )
+    )
+
+    #: RLinf ``pi05_dualfranka_tcp_rot6d``: slots hold base, left wrist, right wrist.
+    #: The checkpoint omits state tokens; state is still needed to restore absolute
+    #: body-frame actions.
+    DUAL_FRANKA = register_robot_preset(
+        RobotPreset(
+            name="dual_franka_tcp_rot6d",
+            embodiment=DUAL_FRANKA_BODY,
+            convention=conventions.CANONICAL,
+            summary="Dual Franka: body-frame delta checkpoint, absolute TCP rot6d output",
+            discrete_state=False,
+        ),
+    )
+    #: RLinf ``pi05_yam_joint``: slots hold top, left, right.
+    YAM = register_robot_preset(
+        RobotPreset(
+            name="yam_joint",
+            embodiment=YAM_BODY,
+            convention=conventions.CANONICAL,
+            summary="Dual YAM: delta-joint checkpoint, absolute qpos14 output",
+            discrete_state=True,
+        ),
+    )
+else:
+
+    def __getattr__(name: str):
+        if name in ("UNITREE_G1", "DUAL_FRANKA", "YAM"):
+            require_apxinf()
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def _build_drobotics_policy(preset: RobotPreset, model_dir, discrete, kwargs) -> Policy:
+    """Protocol B. The preset's wire keys reach the runtime; its builder cannot."""
+    if preset.has_robot_steps:
+        raise ValueError(
+            f"robot preset {preset.name!r} runs robot pre/post steps inside ApxInf's "
+            "processor chain, which the S600 engine does not have"
+        )
+    from .engine_drobotics import load_policy
+
+    return load_policy(model_dir, state_dim=preset.state_dim, discrete_state=discrete, **kwargs)
 
 
 def build_robot_policy(
     robot: str,
     model_dir,
     *,
+    engine: str = "apxinf",
     image_keys: Optional[Sequence[str]] = None,
     state_key: Optional[str] = None,
     prompt_key: Optional[str] = None,
@@ -119,7 +142,17 @@ def build_robot_policy(
     assert it rather than guess. ``robot_steps`` says whether this robot's
     pre/post steps are actually wired, so a server that serves the preset's keys
     without its arithmetic cannot pass for the real thing.
+
+    ``engine`` selects what runs the model: ``apxinf``, or ``drobotics`` for the D-Robotics
+    board, where ``model_dir`` is the SDK's ``oellm_runtime_s600`` directory and may be
+    ``None``. Both results satisfy :class:`~apxinf_robo.protocol.Policy` and take
+    observations under the same keys, but they are not interchangeable in every
+    respect. The drobotics policy has no ``noise=`` (the runtime samples its own, so
+    passing one raises), cannot run a preset that has robot pre/post steps, and does not
+    return ``normalized_actions``. Callers that need those must use ``engine="apxinf"``.
     """
+    if engine not in ENGINES:
+        raise ValueError(f"unknown engine {engine!r}; known: {list(ENGINES)}")
     preset = get_robot_preset(robot)
     keys = tuple(image_keys) if image_keys is not None else preset.image_keys
     state = state_key if state_key is not None else preset.state_key
@@ -141,6 +174,8 @@ def build_robot_policy(
         **dict(preset.builder_kwargs),
         **kwargs,
     }
+    if engine == "drobotics":
+        return _build_drobotics_policy(preset, model_dir, discrete, policy_kwargs)
     if discrete is not None:
         policy_kwargs["discrete_state"] = discrete
     return preset.builder(model_dir, **policy_kwargs)

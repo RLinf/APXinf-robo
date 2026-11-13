@@ -1,0 +1,20 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  s600-engine:
+    # 没有 ApxInf 的环境,和板子一样。S600 的端到端测试必须真跑,不能跳过。
+    runs-on: ubuntu-latest
+    env:
+      APXINF_ROBO_REQUIRE_OPTIONAL: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,drobotics-test]" -e "./apx-drobotics[serve]"
+      - run: pytest apx-drobotics/tests -rs
+      - run: pytest tests/test_serve_drobotics.py tests/test_eval_libero_drobotics.py tests/test_protocol.py tests/test_import_without_apxinf.py tests/test_engine_import.py -rs

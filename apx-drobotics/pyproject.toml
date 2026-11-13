@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apx-drobotics"
+version = "0.1.0"
+description = "Pi0.5 on the D-Robotics S600, behind the same Policy shape as ApxInf"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pillow>=9",
+]
+
+[project.optional-dependencies]
+serve = ["msgpack>=1.0.5", "websockets>=14.0"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+apx-drobotics = "apx_drobotics.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+apx_drobotics = ["contracts/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,10 +1,15 @@
 """``apxinf-robo serve`` -- an OpenPI-compatible WebSocket policy server.
 
-All reusable logic lives in libraries: the transport in :mod:`apxinf.serving`,
-the policy in ApxInf, and the per-embodiment
-wire contract in :mod:`apxinf_robo.presets`. This file is argument parsing and
-wiring -- load an **in-process** policy through the ``apxinf_py`` PyO3 binding
-and serve it.
+All reusable logic lives in libraries: the transport and the policy in the selected
+engine, and the per-embodiment wire contract in :mod:`apxinf_robo.presets`. This file
+is argument parsing and wiring -- load an **in-process** policy and serve it.
+
+**Engine:** ``--engine apxinf`` (default) loads the policy through the ``apxinf_py``
+PyO3 binding and serves it with :mod:`apxinf.serving`. ``--engine drobotics`` runs on a
+D-Robotics S600 board, without ApxInf: the policy and the server come from
+``apx_drobotics``, ``--model-dir`` is the SDK's ``oellm_runtime_s600`` directory (optional,
+default from ``apx_drobotics``), and ``--policy-options`` reaches
+``DroboticsPolicy.from_deployment``. What ApxInf alone can do is refused.
 
 **Embodiment:** ``--robot`` selects the wire keys and the robot pre/post steps,
 the way openpi's ``serve_policy.py --policy.config <TrainConfig>`` does. It
@@ -30,21 +35,45 @@ import argparse
 import json
 import logging
 import pathlib
+import sys
+from typing import Optional
 
-from apxinf.checkpoints import FORMATS as CHECKPOINT_FORMATS
-
+from .. import engine_drobotics
 from ..embodiments.base import ROBOT_PRESETS, available_robots, get_robot_preset
 from ..engine import (
+    apxinf_available,
     load_policy,
     load_random_model,
     policy_from_random,
     resolve_tactics,
     websocket_server,
 )
-from ..preflight import FAIL, WARN, check_checkpoint, format_findings
-from ..presets import build_robot_policy
+from ..presets import ENGINES, build_robot_policy
+from ._engine_options import explicit_flags, refusal
 
 DEFAULT_ROBOT = "franka_libero"
+
+#: Options only ApxInf can honour. Every one parses to ``None`` or ``False`` when not
+#: given (see :mod:`._engine_options`), so a value that is set is one the S600 engine
+#: would otherwise ignore silently. ``seed`` is the one that misleads: the S600 runtime
+#: owns its noise, so ``--seed`` cannot make a run reproducible there.
+_APXINF_ONLY = (
+    "random_weights", "checkpoint", "model_type", "tokenizer", "asset_id", "norm_stats",
+    "calibration", "tactics", "autotune", "action_horizon", "num_views",
+    "ckpt_format", "norm_key", "device", "seed",
+)
+
+#: What the options above mean when the user did not give them, on the ApxInf path.
+_APXINF_DEFAULTS = {"ckpt_format": "auto", "norm_key": "actions", "device": "cuda:0", "seed": 0}
+
+
+def _checkpoint_formats():
+    """``--ckpt-format`` choices. ApxInf defines them, and it only applies to ApxInf."""
+    if not apxinf_available():
+        return None
+    from apxinf.checkpoints import FORMATS
+
+    return FORMATS
 
 
 def _json_options(value: str) -> dict:
@@ -70,7 +99,18 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     Split out from :func:`main` so ``apxinf-robo serve`` and a bare
     ``python -m apxinf_robo.cli.serve`` share one definition.
     """
-    parser.add_argument("--model-dir", type=pathlib.Path, help="checkpoint directory")
+    parser.add_argument(
+        "--engine",
+        choices=ENGINES,
+        default="apxinf",
+        help="what runs the model (default: apxinf). drobotics needs the apx_drobotics package "
+        "and runs on the board.",
+    )
+    parser.add_argument(
+        "--model-dir",
+        type=pathlib.Path,
+        help="checkpoint directory; for --engine drobotics, the SDK's oellm_runtime_s600 directory",
+    )
     parser.add_argument(
         "--robot",
         choices=(*available_robots(include_aliases=True), "none"),
@@ -120,9 +160,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--ckpt-format",
-        choices=CHECKPOINT_FORMATS,
-        default="auto",
-        help="how to read MODEL_DIR. 'auto' (default) picks openpi_pytorch when a "
+        choices=_checkpoint_formats(),
+        default=None,
+        help="ApxInf only. How to read MODEL_DIR. 'auto' (default) picks openpi_pytorch when a "
         "metadata.pt is present and lerobot when a config.json is. Pin it when a "
         "directory carries both and the wrong one wins.",
     )
@@ -141,12 +181,17 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         "policy_postprocessor.json instead; a base checkpoint with no declared "
         "processor state uses LeRobot-compatible identity transforms.",
     )
-    parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--device", default=None, help="ApxInf only (default: cuda:0)")
     parser.add_argument(
         "--policy-options", type=_json_options, default={},
         help="model-specific loader options as JSON; for example Qwen-Drive planner/mode",
     )
-    parser.add_argument("--precision", choices=("auto", "fp8", "bf16", "int8"), default="bf16")
+    parser.add_argument(
+        "--precision",
+        choices=("auto", "fp8", "bf16", "int8", "w8"),
+        default=None,
+        help="default: bf16; w8 for --engine drobotics, the only precision it has",
+    )
     parser.add_argument(
         "--calibration",
         type=pathlib.Path,
@@ -165,7 +210,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         help="deployable action width to trim to, overriding the preset "
         "(LIBERO=7; 0 keeps the full vector)",
     )
-    parser.add_argument("--norm-key", default="actions")
+    parser.add_argument("--norm-key", default=None, help="ApxInf only (default: actions)")
     parser.add_argument(
         "--action-horizon",
         type=int,
@@ -211,7 +256,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     )
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--seed", type=int, default=None,
+        help="ApxInf only (default: 0). The S600 runtime samples its own noise.",
+    )
     parser.add_argument("--log-level", default="INFO")
     return parser
 
@@ -228,12 +276,57 @@ def build_parser() -> argparse.ArgumentParser:
     return add_arguments(parser)
 
 
-def run(args: argparse.Namespace) -> None:
+def _serve_drobotics(args: argparse.Namespace) -> int:
+    """Serve through ``apx_drobotics``; returns the process exit status."""
+    used = explicit_flags(args, _APXINF_ONLY)
+    if used:
+        raise ValueError(refusal(used, "drobotics"))
+    if args.robot == "none":
+        raise ValueError("--engine drobotics requires a robot preset")
+    preset = get_robot_preset(args.robot)
+    drobotics_error = engine_drobotics.require_apx_drobotics().DroboticsError
+    try:
+        policy = build_robot_policy(
+            preset.name,
+            args.model_dir,
+            engine="drobotics",
+            image_keys=args.image_keys,
+            state_key=args.state_key,
+            action_dim=args.action_dim,
+            discrete_state=args.discrete_state,
+            precision=args.precision,
+            metadata={"protocol": "openpi.websocket_policy", "policy": preset.name},
+            **args.policy_options,
+        )
+    except drobotics_error as error:
+        logging.error("%s", error)
+        return error.exit_code
+    except ValueError as error:
+        # The caller asked for something the contract does not offer (a precision,
+        # action width, state encoding or camera count): a usage error, not a crash.
+        logging.error("%s", error)
+        return 2
+    try:
+        return engine_drobotics.websocket_server(policy, args.host, args.port).serve_forever()
+    finally:
+        policy.close()
+
+
+def run(args: argparse.Namespace) -> Optional[int]:
     """Serve until interrupted. ``args`` comes from :func:`build_parser`."""
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
         format="%(asctime)s %(levelname)s %(message)s",
     )
+    if args.engine == "drobotics":
+        return _serve_drobotics(args)
+    for name, value in _APXINF_DEFAULTS.items():
+        if getattr(args, name) is None:
+            setattr(args, name, value)
+    if args.precision == "w8":
+        raise ValueError("--precision w8 is the S600 model; pass --engine drobotics")
+    if args.precision is None:
+        args.precision = "bf16"
     if not args.random_weights and args.model_dir is None:
         raise ValueError("pass --model-dir, or --random-weights for a checkpoint-free engine")
     if args.random_weights and args.model_dir is not None:
@@ -343,6 +436,8 @@ def run(args: argparse.Namespace) -> None:
             metadata={**metadata, "robot": preset.name, "robot_steps": False},
         )
     else:
+        from ..preflight import FAIL, WARN, check_checkpoint, format_findings
+
         # Validate checkpoint and embodiment metadata before loading weights.
         findings = check_checkpoint(
             args.model_dir,
@@ -463,9 +558,16 @@ def _serve_registered_policy(args: argparse.Namespace, model_type: str) -> None:
         policy.close()
 
 
-def main(argv=None) -> None:
-    run(build_parser().parse_args(argv))
+def main(argv=None) -> Optional[int]:
+    args = build_parser().parse_args(argv)
+    try:
+        return run(args)
+    except ValueError as error:
+        if args.engine != "drobotics":
+            raise
+        logging.error("%s", error)
+        return 2
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

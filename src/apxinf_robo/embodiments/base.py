@@ -3,7 +3,7 @@
 A preset pairs an :class:`Embodiment` (camera/action geometry and robot
 processing) with a :class:`~apxinf_robo.conventions.base.Convention` (wire keys)
 and declares the checkpoint's state encoding. ``image_keys`` order maps directly
-to model :data:`~apxinf.policies.base.VIEW_SLOTS`. External packages may add
+to model :data:`~apxinf_robo.protocol.VIEW_SLOTS`. External packages may add
 pairings with :func:`register_robot_preset`.
 
 This module holds only the mechanism — no body and no pairing is defined here.
@@ -16,10 +16,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
 
-from apxinf.policies.base import VIEW_SLOTS
-
 from ..conventions.base import Convention
 from ..engine import load_policy
+from ..protocol import VIEW_SLOTS
 
 __all__ = [
     "VIEW_SLOTS",
