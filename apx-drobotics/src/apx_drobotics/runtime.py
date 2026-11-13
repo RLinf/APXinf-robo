@@ -36,6 +36,7 @@ DEFAULT_WORKER = Path(__file__).resolve().parents[2] / "build/worker/drobotics_p
 L2M_SIZES = "6:6:6:6"
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_PROBLEM = re.compile(r"error|fail|fatal|warn|abort|exception", re.IGNORECASE)
 _MAX_HEADER_BYTES = 1 << 20
 _MAX_PAYLOAD_BYTES = 64 << 20
 
@@ -122,7 +123,10 @@ class Worker:
         for line in self._process.stdout:
             text = _ANSI.sub("", line.decode("utf-8", "replace")).rstrip()
             if text:
-                logger.info("worker: %s", text)
+                # SDK chatter is per-request on the board; keep it for debugging, but
+                # never hide a line that reports a problem.
+                level = logging.WARNING if _PROBLEM.search(text) else logging.DEBUG
+                logger.log(level, "worker: %s", text)
 
     def _exit_status(self):
         try:

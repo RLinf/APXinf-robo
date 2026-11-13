@@ -238,6 +238,32 @@ application supplies its own processing or needs a network service.
 | `load_bare_model` | Preprocessed images, tokens, noise | Normalized model actions |
 | `websocket_server` | A policy and listening address | OpenPI-compatible service |
 
+`load_policy`, `load_bare_model` and `websocket_server` are ApxInf's own
+implementations. They are exported only where ApxInf is installed; on the S600 board
+use `build_robot_policy(..., engine="drobotics")`.
+
+### Engines
+
+An engine is whatever runs the model. Two exist:
+
+| Engine | Module | Runs on | Select with |
+|---|---|---|---|
+| `apxinf` (default) | `apxinf_robo.engine` | NVIDIA GPU | `--engine apxinf` |
+| `drobotics` | `apxinf_robo.engine_drobotics` over the `apx-drobotics` package | D-Robotics S600 | `--engine drobotics` |
+
+Both return a policy of the shape in `apxinf_robo.protocol`, taking observations
+under the same keys, but they are not interchangeable in every respect: the S600
+policy has no `noise=`, runs only presets without robot pre/post steps
+(`franka_libero`), and does not return `normalized_actions`. Options only ApxInf can
+honour (`--seed`, `--device`, `--checkpoint`, `--calibration`, …) are refused under
+`--engine drobotics` rather than ignored.
+
+To add an engine: write `engine_<name>.py` exposing `load_policy` and
+`websocket_server`, add its name to `ENGINES` in `presets.py`, and add a branch in
+`build_robot_policy`. The engine choice is still a hard-coded branch in three places
+(`ENGINES`, `build_robot_policy`, the CLIs' option lists); a capability registry is
+the longer-term fix.
+
 ### L1 — bare model
 
 You own resize, tokenization, noise, and unnormalization; the model takes
@@ -343,6 +369,32 @@ The server keeps the checkpoint's native action width unless the user supplies
 resolved wire contract in connect-time metadata so the client can assert it
 rather than guess.
 
+
+## Running on the D-Robotics S600
+
+Only `franka_libero` with the official W8 `Pi05(libero)` model is supported.
+`apx-drobotics` checks file sizes at start-up but does not re-hash the ~4 GB of model
+files (`deploy.sh` already did); pass `--policy-options '{"verify_hashes": true}'` to
+audit a deployment that may have been modified. See `apx-drobotics/README.md`.
+ApxInf is not used; the repository runs on the board without the `apxinf/` submodule.
+
+On the board (RDK S600 V5.1.0+, BPU carveout ≥ 5 GB, network access to the SDK download):
+
+```bash
+# 1. Deploy: SDK, model, venv, C++ worker (re-runnable; ~8 GB disk during setup)
+bash apx-drobotics/scripts/deploy.sh
+
+# 2. Serve
+/opt/d-robotics-llm/2.0.0/venv-apx-drobotics/bin/apxinf-robo serve \
+  --engine drobotics --robot franka_libero --port 8000 \
+  --model-dir /opt/d-robotics-llm/2.0.0/D-Robotics_LLM_2.0.0_S600_S100_SDK/oellm_runtime_s600
+```
+
+On the PC, evaluate against it as with any other server:
+
+```bash
+apxinf-robo eval-libero --backend websocket --host <board> --port 8000 --precision w8
+```
 
 ## Precisions
 

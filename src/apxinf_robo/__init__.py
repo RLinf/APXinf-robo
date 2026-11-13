@@ -55,19 +55,18 @@ from .embodiments import (
     get_robot_preset,
     register_robot_preset,
 )
-from .engine import (
-    ApxInfEngine,
-    apxinf_available,
-    load_bare_model,
-    load_policy,
-    require_apxinf,
-    websocket_server,
-)
+from .engine import ApxInfEngine, apxinf_available, require_apxinf
 from .presets import ENGINES, FRANKA_LIBERO, build_robot_policy
 from .protocol import Policy
 
-#: Exports that exist only where ApxInf does.
+#: Exports that exist only where ApxInf does. ``load_policy``, ``load_bare_model`` and
+#: ``websocket_server`` are ApxInf's implementations, not an engine-neutral facade, so
+#: they are not offered where ApxInf is absent; use ``build_robot_policy`` (which takes
+#: ``engine=``) or ``apxinf_robo.engine_drobotics`` there.
 _APXINF_NAMES = (
+    "load_policy",
+    "load_bare_model",
+    "websocket_server",
     "UNITREE_G1",
     "DUAL_FRANKA",
     "YAM",
@@ -83,6 +82,7 @@ _APXINF_NAMES = (
 
 if apxinf_available():
     from .embodiments import build_unitree_g1_policy
+    from .engine import load_bare_model, load_policy, websocket_server
     from .preflight import (
         FAIL,
         INFO,
@@ -130,9 +130,6 @@ __all__ = [
     "Policy",
     "ApxInfEngine",
     "apxinf_available",
-    "load_policy",
-    "load_bare_model",
-    "websocket_server",
     # needs ApxInf
     *(_APXINF_NAMES if apxinf_available() else ()),
     "__version__",

@@ -49,15 +49,22 @@ from ..engine import (
     websocket_server,
 )
 from ..presets import ENGINES, build_robot_policy
+from ._engine_options import explicit_flags, refusal
 
 DEFAULT_ROBOT = "franka_libero"
 
-#: Options only ApxInf can honour. All of them default to something false, so a
-#: value that is set is one the S600 engine would otherwise ignore silently.
+#: Options only ApxInf can honour. Every one parses to ``None`` or ``False`` when not
+#: given (see :mod:`._engine_options`), so a value that is set is one the S600 engine
+#: would otherwise ignore silently. ``seed`` is the one that misleads: the S600 runtime
+#: owns its noise, so ``--seed`` cannot make a run reproducible there.
 _APXINF_ONLY = (
     "random_weights", "checkpoint", "model_type", "tokenizer", "asset_id", "norm_stats",
     "calibration", "tactics", "autotune", "action_horizon", "num_views",
+    "ckpt_format", "norm_key", "device", "seed",
 )
+
+#: What the options above mean when the user did not give them, on the ApxInf path.
+_APXINF_DEFAULTS = {"ckpt_format": "auto", "norm_key": "actions", "device": "cuda:0", "seed": 0}
 
 
 def _checkpoint_formats():
@@ -154,8 +161,8 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--ckpt-format",
         choices=_checkpoint_formats(),
-        default="auto",
-        help="how to read MODEL_DIR. 'auto' (default) picks openpi_pytorch when a "
+        default=None,
+        help="ApxInf only. How to read MODEL_DIR. 'auto' (default) picks openpi_pytorch when a "
         "metadata.pt is present and lerobot when a config.json is. Pin it when a "
         "directory carries both and the wrong one wins.",
     )
@@ -174,7 +181,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         "policy_postprocessor.json instead; a base checkpoint with no declared "
         "processor state uses LeRobot-compatible identity transforms.",
     )
-    parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--device", default=None, help="ApxInf only (default: cuda:0)")
     parser.add_argument(
         "--policy-options", type=_json_options, default={},
         help="model-specific loader options as JSON; for example Qwen-Drive planner/mode",
@@ -203,7 +210,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         help="deployable action width to trim to, overriding the preset "
         "(LIBERO=7; 0 keeps the full vector)",
     )
-    parser.add_argument("--norm-key", default="actions")
+    parser.add_argument("--norm-key", default=None, help="ApxInf only (default: actions)")
     parser.add_argument(
         "--action-horizon",
         type=int,
@@ -249,7 +256,10 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     )
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--seed", type=int, default=None,
+        help="ApxInf only (default: 0). The S600 runtime samples its own noise.",
+    )
     parser.add_argument("--log-level", default="INFO")
     return parser
 
@@ -268,10 +278,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _serve_drobotics(args: argparse.Namespace) -> int:
     """Serve through ``apx_drobotics``; returns the process exit status."""
-    used = [name for name in _APXINF_ONLY if getattr(args, name)]
+    used = explicit_flags(args, _APXINF_ONLY)
     if used:
-        flags = ", ".join("--" + name.replace("_", "-") for name in used)
-        raise ValueError(f"{flags} applies to ApxInf, not to --engine drobotics")
+        raise ValueError(refusal(used, "drobotics"))
     if args.robot == "none":
         raise ValueError("--engine drobotics requires a robot preset")
     preset = get_robot_preset(args.robot)
@@ -292,6 +301,11 @@ def _serve_drobotics(args: argparse.Namespace) -> int:
     except drobotics_error as error:
         logging.error("%s", error)
         return error.exit_code
+    except ValueError as error:
+        # The caller asked for something the contract does not offer (a precision,
+        # action width, state encoding or camera count): a usage error, not a crash.
+        logging.error("%s", error)
+        return 2
     try:
         return engine_drobotics.websocket_server(policy, args.host, args.port).serve_forever()
     finally:
@@ -306,6 +320,9 @@ def run(args: argparse.Namespace) -> Optional[int]:
     )
     if args.engine == "drobotics":
         return _serve_drobotics(args)
+    for name, value in _APXINF_DEFAULTS.items():
+        if getattr(args, name) is None:
+            setattr(args, name, value)
     if args.precision == "w8":
         raise ValueError("--precision w8 is the S600 model; pass --engine drobotics")
     if args.precision is None:
@@ -542,7 +559,14 @@ def _serve_registered_policy(args: argparse.Namespace, model_type: str) -> None:
 
 
 def main(argv=None) -> Optional[int]:
-    return run(build_parser().parse_args(argv))
+    args = build_parser().parse_args(argv)
+    try:
+        return run(args)
+    except ValueError as error:
+        if args.engine != "drobotics":
+            raise
+        logging.error("%s", error)
+        return 2
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ from typing import Any, Mapping, Optional, Sequence
 import numpy as np
 
 from . import contract as contract_lib
+from ._version import __version__
 from .errors import DeploymentError, RuntimeFailure
 from .postprocess import Postprocess
 from .preprocess import Preprocess
@@ -29,6 +30,36 @@ logger = logging.getLogger(__name__)
 
 def _comparable(value: Any) -> Any:
     return list(value) if isinstance(value, (list, tuple)) else value
+
+
+#: What ``from_deployment`` reads from the contract's published metadata.
+_REQUIRED_FACTS = ("action_dim", "state_dim", "precision")
+
+
+def _camera_problems(contract: Mapping[str, Any], image_keys: Sequence[str]) -> list:
+    """Catch cameras given in the wrong order, where the contract names the roles.
+
+    Wire keys are the caller's, so the roles cannot be checked exactly. But a wrist
+    camera under the base slot is the mistake that costs the most and shows nothing:
+    both are valid images, and only the success rate drops. A key that names the wrist
+    (``wrist`` in it) is taken as the wrist camera; a swap is an error, a wrist slot
+    whose key does not mention the wrist is a warning.
+    """
+    slots = [slot for slot in contract["camera"]["slots"] if not slot["masked"]]
+    if len(slots) != len(image_keys):
+        return []  # the count is reported on its own
+    keys = {slot["role"]: key for slot, key in zip(slots, image_keys)}
+    base, wrist = keys.get("base"), keys.get("wrist")
+    if base is not None and "wrist" in base.lower() and (
+        wrist is None or "wrist" not in wrist.lower()
+    ):
+        return [f"image key {base!r} names a wrist camera but fills the base slot"]
+    if wrist is not None and "wrist" not in wrist.lower():
+        logger.warning(
+            "image key %r fills the wrist slot but does not mention a wrist camera; "
+            "check the camera order", wrist,
+        )
+    return []
 
 
 class DroboticsPolicy:
@@ -66,7 +97,7 @@ class DroboticsPolicy:
         discrete_state: Optional[bool] = None,
         precision: Optional[str] = None,
         metadata: Optional[Mapping[str, Any]] = None,
-        verify_hashes: bool = True,
+        verify_hashes: bool = False,
         ready_timeout: Optional[float] = None,
         infer_deadline: Optional[float] = None,
     ) -> "DroboticsPolicy":
@@ -81,15 +112,25 @@ class DroboticsPolicy:
         Raises ``ValueError`` for a caller that does not fit the contract,
         :class:`~apx_drobotics.errors.DeploymentError` for a deployment that does not, and
         :class:`~apx_drobotics.errors.StartupFailure` if the runtime does not come up.
+
+        ``verify_hashes`` re-hashes the model and SDK files, about 4 GB, so it is off by
+        default: file presence and byte sizes are always checked, and ``scripts/deploy.sh``
+        has already verified the hashes when it installed them. Turn it on to audit a
+        deployment that may have been modified since (``--policy-options
+        '{"verify_hashes": true}'``). ``metadata["hashes_verified"]`` records which it was.
         """
         loaded = (dict(contract) if isinstance(contract, Mapping)
                   else contract_lib.load_contract(contract))
         facts = contract_lib.model_metadata(loaded)
+        absent = [name for name in _REQUIRED_FACTS if name not in facts]
+        if absent:
+            raise DeploymentError([f"contract metadata is missing {name!r}" for name in absent])
         views = contract_lib.unmasked_views(loaded)
         image_keys = tuple(image_keys)
         problems = []
         if len(image_keys) != views or len(set(image_keys)) != views:
             problems.append(f"image_keys {list(image_keys)}: need {views} distinct camera keys")
+        problems += _camera_problems(loaded, image_keys)
         for name, value in (("action_dim", action_dim), ("state_dim", state_dim),
                             ("precision", precision)):
             if value is not None and value != facts[name]:
@@ -97,6 +138,7 @@ class DroboticsPolicy:
         if discrete_state:
             problems.append("discrete_state=True: this runtime does not read state")
         own = {**facts, "engine": "apx-drobotics", "runtime": "d-robotics-oellm",
+               "apx_drobotics_version": __version__, "hashes_verified": bool(verify_hashes),
                "image_keys": list(image_keys), "state_key": state_key, "prompt_key": prompt_key}
         extra = dict(metadata or {})
         for name, value in extra.items():
@@ -114,6 +156,7 @@ class DroboticsPolicy:
         if problems:
             raise DeploymentError(problems)
 
+        own["worker_sha256"] = contract_lib.sha256_file(executable)
         timeouts = loaded["timeouts"]
         logger.info("starting worker %s", executable)
         process = Worker.start(

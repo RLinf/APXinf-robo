@@ -31,6 +31,10 @@ target_include_directories(drobotics_pi05_worker PRIVATE
 # libvla_sdk.so in SDK v2.0.0 references oellm::component::Tokenizer::~Tokenizer(),
 # which no SDK library exports. The official demo runs with it unresolved, so the
 # link allows it rather than failing; the loader binds functions lazily.
+# TODO: --allow-shlib-undefined is global, so it would also hide any *other* symbol the
+# SDK libraries later fail to export. Track the SDK-side fix in an upstream issue and
+# delete the flag once Tokenizer::~Tokenizer is exported; until then, after an SDK
+# upgrade, re-check with `ldd -r` on the built worker for unresolved symbols.
 target_link_libraries(drobotics_pi05_worker PRIVATE
   -Wl,--no-as-needed
   "${PI0_DIST}/libvla_pi0_sdk.so"

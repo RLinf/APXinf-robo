@@ -13,7 +13,9 @@ import json
 import numpy as np
 import pytest
 
-pytest.importorskip("openpi_client")
+from _require import require
+
+require("openpi_client")
 
 from openpi_client import websocket_client_policy  # noqa: E402
 
@@ -27,6 +29,8 @@ METADATA = {
     "model_type": "pi05_drobotics_w8",
     "contract_id": "drobotics-pi05-libero-w8",
     "contract_sha256": "a" * 64,
+    "worker_sha256": "b" * 64,
+    "apx_drobotics_version": "0.1.0",
     "precision": "w8",
     "image_keys": ["observation/image", "observation/wrist_image"],
     "state_key": "observation/state",
@@ -165,6 +169,56 @@ def test_drobotics_engine_is_for_the_in_process_backend(capsys):
     assert "--engine drobotics applies to --backend in-process" in err
 
 
+@pytest.mark.parametrize(
+    "flag",
+    [
+        ["--device", "cuda:0"], ["--num-flow-steps", "5"], ["--action-horizon", "10"],
+        ["--flow-start-time", "0.5"], ["--calibration", "c.json"], ["--tokenizer", "t"],
+        ["--norm-stats", "n.json"], ["--model-type", "pi05"], ["--checkpoint", "c"],
+        ["--model-seed", "1"], ["--norm-key", "x"], ["--num-views", "2"], ["--warm-start"],
+    ],
+)
+def test_drobotics_refuses_options_it_would_silently_drop(capsys, flag):
+    err = _error(capsys, "--backend", "in-process", "--engine", "drobotics",
+                 "--precision", "w8", *flag)
+    assert f"{flag[0]} applies to ApxInf, not to --engine drobotics" in err
+
+
+def test_apxinf_still_gets_its_defaults():
+    args = eval_libero.parse_args(
+        ["--backend", "in-process", "--model-dir", "/m", "--precision", "bf16", *COMMON]
+    )
+    assert args.device == "cuda:0" and args.action_dim == 7
+
+
+def test_drobotics_passes_action_dim_to_the_contract(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        "apxinf_robo.presets.build_robot_policy",
+        lambda *a, **kw: (seen.update(kw), type("P", (), {"metadata": {"model_type": "m"}})())[1],
+    )
+    args = eval_libero.parse_args(["--backend", "in-process", "--engine", "drobotics",
+                                   "--precision", "w8", "--action-dim", "16", *COMMON])
+    eval_libero.InProcessBackend(args)
+    assert seen["action_dim"] == 16  # the contract, not this CLI, decides it is wrong
+
+
+def test_websocket_backend_survives_a_client_without_ping_timeout(monkeypatch, caplog):
+    from openpi_client import websocket_client_policy
+
+    class Client:
+        _ws = object()  # no ping_timeout attribute
+
+        def __init__(self, host, port): ...
+        def get_server_metadata(self): return {"precision": "w8", **METADATA}
+
+    monkeypatch.setattr(websocket_client_policy, "WebsocketClientPolicy", Client)
+    monkeypatch.setattr(eval_libero, "_assert_server_speaks_the_same_dialect", lambda m: None)
+    with caplog.at_level("WARNING"):
+        eval_libero.WebsocketBackend("127.0.0.1", 1, "w8")
+    assert "no longer exposes _ws.ping_timeout" in caplog.text
+
+
 def test_drobotics_engine_finds_the_sdk_itself():
     args = eval_libero.parse_args(
         ["--backend", "in-process", "--engine", "drobotics", "--precision", "w8", *COMMON]
@@ -173,7 +227,7 @@ def test_drobotics_engine_finds_the_sdk_itself():
 
 
 def test_in_process_drobotics_backend_uses_the_same_preset_keys(monkeypatch, tmp_path):
-    testing = pytest.importorskip("apx_drobotics.testing")
+    testing = require("apx_drobotics.testing")
     fake = testing.fake_deployment(tmp_path)
     load = engine_drobotics.load_policy
     monkeypatch.setattr(engine_drobotics, "load_policy",
@@ -228,6 +282,8 @@ def test_identity_records_what_the_engine_publishes():
         "model_type": "pi05_drobotics_w8",
         "contract_id": "drobotics-pi05-libero-w8",
         "contract_sha256": "a" * 64,
+        "worker_sha256": "b" * 64,
+        "apx_drobotics_version": "0.1.0",
     }
 
 
@@ -246,7 +302,15 @@ def test_resume_accepts_rows_of_the_same_run(tmp_path):
     assert len(eval_libero.completed_runs(ledger, "w8", identity)) == 2
 
 
-@pytest.mark.parametrize("field, value", [("contract_sha256", "0" * 64), ("replan_steps", 10)])
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("contract_sha256", "0" * 64),
+        ("replan_steps", 10),
+        ("worker_sha256", "0" * 64),  # a rebuilt worker
+        ("apx_drobotics_version", "0.2.0"),
+    ],
+)
 def test_resume_refuses_rows_of_another_run(tmp_path, field, value):
     identity = eval_libero.run_identity(_args(), METADATA)
     ledger = tmp_path / "r.jsonl"

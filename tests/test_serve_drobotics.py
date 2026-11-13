@@ -6,6 +6,8 @@ worker, and the evaluator's own backend connects to it.
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -19,14 +21,23 @@ import time
 import numpy as np
 import pytest
 
-pytest.importorskip("msgpack")
-pytest.importorskip("websockets")
-pytest.importorskip("openpi_client")
-testing = pytest.importorskip("apx_drobotics.testing")
+from _require import require
+
+require("msgpack")
+require("websockets")
+require("openpi_client")
+testing = require("apx_drobotics.testing")
 
 from openpi_client import image_tools, websocket_client_policy  # noqa: E402
 
 from apxinf_robo.cli import eval_libero, serve  # noqa: E402
+
+#: These exercise the ApxInf path, which the S600 CI job deliberately does not install.
+needs_apxinf = pytest.mark.skipif(
+    importlib.util.find_spec("apxinf") is None or getattr(
+        importlib.import_module("apxinf"), "__file__", None) is None,
+    reason="needs ApxInf",
+)
 
 NO_APXINF = pathlib.Path(__file__).with_name("_no_apxinf.py")
 
@@ -108,7 +119,7 @@ def frames():
 
 
 def test_evaluator_talks_to_the_server_without_apxinf_on_the_board(launch):
-    server, fake = launch()
+    server, fake = launch("ok", "--log-level", "DEBUG")  # worker output is DEBUG
     assert server.wait_listening(), server.output
     backend = eval_libero.WebsocketBackend("127.0.0.1", server.port, "w8")
     base, wrist = frames()
@@ -194,6 +205,11 @@ def test_sigterm_stops_cleanly_and_releases_the_worker(launch):
         (["--autotune", "--action-horizon", "50"], "--autotune, --action-horizon"),
         (["--random-weights"], "--random-weights applies to ApxInf"),
         (["--robot", "none"], "requires a robot preset"),
+        # Options whose real default is a value: they must still be refused when given.
+        (["--seed", "0"], "--seed applies to ApxInf"),
+        (["--device", "cuda:0"], "--device applies to ApxInf"),
+        (["--norm-key", "actions"], "--norm-key applies to ApxInf"),
+        (["--ckpt-format", "auto"], "--ckpt-format applies to ApxInf"),
     ],
 )
 def test_options_the_drobotics_cannot_honour_are_refused(argv, needle):
@@ -202,12 +218,46 @@ def test_options_the_drobotics_cannot_honour_are_refused(argv, needle):
         serve.run(args)
 
 
+@pytest.mark.parametrize(
+    "argv", [["--precision", "bf16"], ["--precision", "fp8"], ["--action-dim", "16"],
+             ["--discrete-state"], ["--image-keys", "only/one"]],
+)
+def test_a_configuration_the_contract_refuses_exits_cleanly(argv, tmp_path, caplog):
+    """The runtime's own ValueError must reach the user as an error, not a traceback."""
+    fake = testing.fake_deployment(tmp_path)
+    status = serve.main([
+        "--engine", "drobotics", "--model-dir", str(fake.sdk_root),
+        "--policy-options", json.dumps(fake.options), *argv,
+    ])
+    assert status == 2
+    assert "cannot serve this configuration on the S600" in caplog.text
+
+
+def test_main_turns_a_refused_option_into_an_exit_status(caplog):
+    assert serve.main(["--engine", "drobotics", "--seed", "3"]) == 2
+    assert "--seed applies to ApxInf" in caplog.text
+
+
+@needs_apxinf
+def test_apxinf_defaults_are_applied_after_the_check(monkeypatch, tmp_path):
+    (tmp_path / "config.json").write_text(json.dumps({"model_type": "pi0_fast"}))
+    seen = {}
+    monkeypatch.setattr(serve, "build_robot_policy", lambda robot, model_dir, **options: (
+        seen.update(options) or type("P", (), {"action_horizon": 1, "action_dim": 1,
+                                               "close": lambda self: None})()))
+    monkeypatch.setattr(serve, "websocket_server",
+                        lambda *a: type("S", (), {"serve_forever": lambda self: None})())
+    serve.run(serve.build_parser().parse_args(["--model-dir", str(tmp_path)]))
+    assert (seen["device"], seen["seed"] if "seed" in seen else 0) == ("cuda:0", 0)
+
+
 def test_w8_without_the_drobotics_engine_is_refused():
     args = serve.build_parser().parse_args(["--model-dir", "/m", "--precision", "w8"])
     with pytest.raises(ValueError, match="--engine drobotics"):
         serve.run(args)
 
 
+@needs_apxinf
 def test_apxinf_default_precision_is_unchanged(monkeypatch, tmp_path):
     (tmp_path / "config.json").write_text(json.dumps({"model_type": "pi0_fast"}))
     captured = {}

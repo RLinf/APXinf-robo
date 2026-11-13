@@ -145,8 +145,11 @@ def build_robot_policy(
 
     ``engine`` selects what runs the model: ``apxinf``, or ``drobotics`` for the D-Robotics
     board, where ``model_dir`` is the SDK's ``oellm_runtime_s600`` directory and may be
-    ``None``. The result has the same :class:`~apxinf_robo.protocol.Policy` shape either
-    way, and takes observations under the same keys.
+    ``None``. Both results satisfy :class:`~apxinf_robo.protocol.Policy` and take
+    observations under the same keys, but they are not interchangeable in every
+    respect. The drobotics policy has no ``noise=`` (the runtime samples its own, so
+    passing one raises), cannot run a preset that has robot pre/post steps, and does not
+    return ``normalized_actions``. Callers that need those must use ``engine="apxinf"``.
     """
     if engine not in ENGINES:
         raise ValueError(f"unknown engine {engine!r}; known: {list(ENGINES)}")

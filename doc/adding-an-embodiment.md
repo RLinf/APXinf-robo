@@ -494,9 +494,12 @@ array names, prompt as a 0-d unicode array — or export a JSONL manifest instea
    `embodiments/<robot>/steps.py` imports no policy symbols;
    `embodiments/<robot>/builder.py` does the assembly. Neither holds a wire key:
    those are a dataset's, and live in `conventions/`.
-3. **Only `engine.py` loads or runs the engine.** Everything else may import
-   ApxInf for *vocabulary* — `Policy`, `ProcessorStep`, `Finding`, `VIEW_SLOTS`,
-   `Unnormalizer` — because shared type information belongs where it is used.
+3. **Only an engine module loads or runs an engine.** `engine.py` is ApxInf's and
+   `engine_drobotics.py` is the S600's (`apx_drobotics`); see
+   [Engines](../README.md#engines). Everything else may import ApxInf for
+   *vocabulary* — `Policy`, `ProcessorStep`, `Finding`, `VIEW_SLOTS`,
+   `Unnormalizer` — because shared type information belongs where it is used, and
+   `protocol.py` restates the shared part so the package imports without ApxInf.
    Nothing else constructs a model, allocates a device, or serves one.
 4. **Fail loudly with the served contract in the message.** Every error in this
    layer names what the server is actually serving, because the person reading it

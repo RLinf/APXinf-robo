@@ -8,6 +8,7 @@ timing the common names.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Mapping, Tuple
 
 import numpy as np
@@ -17,6 +18,8 @@ from .errors import RuntimeFailure
 
 __all__ = ["Postprocess"]
 
+logger = logging.getLogger(__name__)
+
 #: The runtime's profile entries that are time spent in the HBMs.
 _MODEL_PARTS = ("visual", "lm", "action")
 
@@ -24,6 +27,7 @@ _MODEL_PARTS = ("visual", "lm", "action")
 class Postprocess:
     def __init__(self, contract: Mapping[str, Any]) -> None:
         self.contract = contract
+        self._warned_parts = False
 
     def __call__(self, reply: Mapping[str, Any], payload: bytes) -> Tuple[np.ndarray, dict]:
         """Return ``(actions, timing)``; actions are ``float32 [horizon, dim]``."""
@@ -40,6 +44,11 @@ class Postprocess:
         if problems:
             raise RuntimeFailure("; ".join(problems))
         profile = reply.get("timing_ms", {})
+        missing = [part for part in _MODEL_PARTS if part not in profile]
+        if missing and not self._warned_parts:
+            # model_ms would silently under-report, and latency is what this feeds.
+            self._warned_parts = True
+            logger.warning("runtime profile has no %s entries; model_ms is incomplete", missing)
         timing = {
             "model_ms": float(sum(profile.get(part, 0.0) for part in _MODEL_PARTS)),
             **{f"sdk_{name}_ms": float(value) for name, value in profile.items()},

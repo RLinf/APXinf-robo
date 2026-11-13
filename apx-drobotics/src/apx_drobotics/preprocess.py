@@ -10,8 +10,12 @@ runtime (stage 4):
 * It encodes the prompt as given, so an underscore reaches the model as its own token.
   ApxInf's tokenizer cleans the prompt; on this path nothing else would.
 
-The validation is strict because none of these mistakes fail on their own: the runtime
-accepts a seven-value state or an uncleaned prompt, and only the success rate changes.
+What an observation must contain is checked strictly, because none of these mistakes
+fail on their own: the runtime accepts a seven-value state or an uncleaned prompt, and
+only the success rate changes. What it may contain is as open as with ApxInf: keys that
+are not inputs are ignored, so one client works against either engine. The state is
+required here although the SDK's preprocessing ignores discretized state, because the
+runtime itself is handed it with every request.
 """
 
 from __future__ import annotations
@@ -75,6 +79,11 @@ class Preprocess:
     ) -> None:
         self.contract = contract
         self.image_keys = tuple(image_keys)
+        if state_key in self.image_keys or prompt_key in self.image_keys or state_key == prompt_key:
+            raise ValueError(
+                f"image keys {list(self.image_keys)}, state key {state_key!r} and prompt key "
+                f"{prompt_key!r} must all be different"
+            )
         self.state_key = state_key
         self.prompt_key = prompt_key
 
@@ -106,9 +115,7 @@ class Preprocess:
         if not isinstance(observation, Mapping):
             raise RequestError([f"expected a map of observation keys, got {type(observation).__name__}"])
         keys = (*self.image_keys, self.state_key, self.prompt_key)
-        problems = [f"key {key!r} is not an input of this policy"
-                    for key in sorted(map(str, set(observation) - set(keys)))]
-        problems += [f"key {key!r} is missing" for key in keys if key not in observation]
+        problems = [f"key {key!r} is missing" for key in keys if key not in observation]
         for key in self.image_keys:
             if key in observation:
                 problems += self._image_problems(key, observation[key])

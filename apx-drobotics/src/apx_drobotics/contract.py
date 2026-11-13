@@ -29,6 +29,7 @@ __all__ = [
     "check_deployment",
     "check_model_input",
     "contract_sha256",
+    "sha256_file",
     "load_contract",
     "model_metadata",
     "unmasked_views",
@@ -52,7 +53,8 @@ def contract_sha256(contract: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def _sha256_file(path: Path) -> str:
+def sha256_file(path: Path) -> str:
+    """SHA-256 of a file, read in blocks."""
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(4 << 20), b""):
@@ -76,7 +78,7 @@ def _check_file(path: Path, entry: Mapping[str, Any], *, verify_hash: bool) -> l
     if size != entry["bytes"]:
         return [f"{path}: {size} bytes, contract says {entry['bytes']}"]
     if verify_hash:
-        actual = _sha256_file(path)
+        actual = sha256_file(path)
         if actual != entry["sha256"]:
             return [f"{path}: sha256 {actual}, contract says {entry['sha256']}"]
     return []

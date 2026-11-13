@@ -49,6 +49,7 @@ import collections
 import functools
 import hashlib
 import json
+import logging
 import os
 import pathlib
 import sys
@@ -57,6 +58,8 @@ import traceback
 from typing import Optional, Protocol, Tuple
 
 import numpy as np
+
+from ._engine_options import explicit_flags, refusal
 
 from ..envs.libero import (
     libero_gr00t_action,
@@ -126,9 +129,21 @@ def libero_convention():
 # --- LIBERO harness: resumable ledger + summary aggregation -------------------
 
 
+#: In-process options that only ApxInf can honour; ``--engine drobotics`` refuses them
+#: instead of dropping them. ``--warm-start`` is here because it feeds the model noise,
+#: which the S600 runtime samples for itself.
+_APXINF_ONLY = (
+    "model_type", "checkpoint", "device", "calibration", "tactics", "tokenizer",
+    "norm_stats", "norm_key", "num_views", "num_flow_steps", "flow_start_time",
+    "action_horizon", "model_seed", "warm_start",
+)
+
 #: Metadata that identifies a contract-pinned engine, recorded in the run identity.
 _CONTRACT_IDENTITY = (
     "engine", "runtime", "sdk_version", "model_type", "contract_id", "contract_sha256",
+    # The contract hash covers the model files, not the code that drives them: a rebuilt
+    # worker or a newer apx_drobotics must not resume an older ledger.
+    "worker_sha256", "apx_drobotics_version",
 )
 
 
@@ -410,8 +425,18 @@ class WebsocketBackend:
         self._client = websocket_client_policy.WebsocketClientPolicy(host, port)
         # LIBERO scene initialization can monopolize the client process for longer
         # than websockets' 20 s Pong deadline. Keep sending Pings, but do not mistake
-        # a slow simulator reset for a dead server.
-        self._client._ws.ping_timeout = None
+        # a slow simulator reset for a dead server. openpi_client offers no public
+        # setting for this, so it reaches a private attribute: guard it, and say so
+        # if a newer client no longer has it rather than failing on a missing name
+        # or silently running with the default deadline.
+        connection = getattr(self._client, "_ws", None)
+        if connection is not None and hasattr(connection, "ping_timeout"):
+            connection.ping_timeout = None
+        else:
+            logging.warning(
+                "openpi_client no longer exposes _ws.ping_timeout; a LIBERO reset that "
+                "blocks this process for over 20 s may drop the connection"
+            )
         self.metadata = self._client.get_server_metadata()
         self.model_type = self.metadata.get("model_type", "pi05")
         actual_precision = self.metadata.get("precision")
@@ -470,8 +495,16 @@ class InProcessBackend:
         if args.engine == "drobotics":
             from ..presets import build_robot_policy
 
+            # parse_args has already refused the options this engine cannot honour.
+            # action_dim and discrete_state are passed on instead: the contract fixes
+            # both, so a value that disagrees with it is an error there, not a setting.
             self._policy = build_robot_policy(
-                LIBERO_PRESET, args.model_dir, engine="drobotics", precision=args.precision
+                LIBERO_PRESET,
+                args.model_dir,
+                engine="drobotics",
+                precision=args.precision,
+                action_dim=args.action_dim,
+                discrete_state=args.discrete_state,
             )
             self.metadata = dict(self._policy.metadata)
             self.model_type = self.metadata["model_type"]
@@ -756,6 +789,8 @@ def run_episode(
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from ..presets import ENGINES
+
     parser = argparse.ArgumentParser(
         prog="apxinf-robo eval-libero",
         description=__doc__,
@@ -805,7 +840,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     in_process = parser.add_argument_group("in-process backend")
     in_process.add_argument(
-        "--engine", choices=("apxinf", "drobotics"), default="apxinf",
+        "--engine", choices=ENGINES, default="apxinf",
         help="what runs the model in this process; drobotics needs an S600 board. With "
         "--backend websocket the server decides.",
     )
@@ -815,7 +850,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     in_process.add_argument("--model-type", default=None, help="override config.json model type")
     in_process.add_argument("--checkpoint", type=pathlib.Path)
-    in_process.add_argument("--device", default="cuda:0")
+    in_process.add_argument("--device", default=None, help="ApxInf only (default: cuda:0)")
     in_process.add_argument("--calibration", type=pathlib.Path)
     in_process.add_argument("--tactics", type=pathlib.Path, help=argparse.SUPPRESS)
     in_process.add_argument("--tokenizer", type=pathlib.Path,
@@ -825,7 +860,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="explicit OpenPI-style norm_stats.json; overrides checkpoint normalization",
     )
     in_process.add_argument("--norm-key")
-    in_process.add_argument("--action-dim", type=int, default=7, help="0 keeps the full vector")
+    in_process.add_argument(
+        "--action-dim", type=int, default=None,
+        help="deployable action width (default: 7); 0 keeps the full vector",
+    )
     in_process.add_argument(
         "--num-views",
         type=int,
@@ -884,11 +922,20 @@ def parse_args(argv=None) -> argparse.Namespace:
                          "with --backend websocket the server decides")
         if args.precision != "w8":
             parser.error("--engine drobotics requires --precision w8")
+        used = explicit_flags(args, _APXINF_ONLY)
+        if used:
+            parser.error(refusal(used, "drobotics"))
     elif args.backend == "in-process":
         if args.model_dir is None:
             parser.error("--backend in-process requires --model-dir")
         if args.precision == "w8":
             parser.error("--precision w8 is the S600 model; pass --engine drobotics")
+    if args.engine != "drobotics":
+        # Defaults that must not look "given" to the check above; see _engine_options.
+        if args.device is None:
+            args.device = "cuda:0"
+        if args.action_dim is None:
+            args.action_dim = 7
     if args.norm_stats is not None:
         if args.backend == "websocket":
             parser.error(

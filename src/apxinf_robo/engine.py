@@ -30,6 +30,7 @@ package is worth having.
 from __future__ import annotations
 
 import pathlib
+import warnings
 from typing import Any, Optional, Sequence
 
 __all__ = [
@@ -40,6 +41,7 @@ __all__ = [
     "policy_from_random",
     "resolve_tactics",
     "websocket_server",
+    "ApxinfShadowedError",
     "apxinf_available",
     "require_apxinf",
     "INTERFACES",
@@ -56,6 +58,18 @@ _INSTALL_HINT = (
     "    pip install -e ./apxinf/python/apxinf --config-settings editable_mode=strict\n"
     "and build the apxinf_py extension with maturin for anything that runs a model."
 )
+
+
+_shadow_warned = False
+
+
+class ApxinfShadowedError(ImportError):
+    """``import apxinf`` found this checkout's ``apxinf/`` directory, not the engine.
+
+    A subclass of ``ImportError`` so existing handlers keep working, but distinct
+    from "not installed": the fix is different (change ``sys.path`` or the working
+    directory, not install the engine).
+    """
 
 
 def _checkout_namespace_dir(apxinf):
@@ -91,7 +105,7 @@ def require_apxinf():
     if getattr(apxinf, "__file__", None) is None:  # pragma: no cover
         checkout = _checkout_namespace_dir(apxinf)
         if checkout is not None:
-            raise ImportError(
+            raise ApxinfShadowedError(
                 f"`import apxinf` resolved to a namespace containing {checkout}, "
                 "not a usable engine package.\n" + _INSTALL_HINT + "\n"
                 "If the engine is already installed editable in this Python "
@@ -104,9 +118,22 @@ def require_apxinf():
 
 
 def apxinf_available() -> bool:
-    """Whether ApxInf can be imported here. On the S600 board it cannot."""
+    """Whether ApxInf can be imported here. On the S600 board it cannot.
+
+    "Not installed" is an ordinary False. A shadowed import is also False -- on the
+    board an empty ``apxinf/`` submodule directory looks exactly like shadowing, and
+    ``import apxinf_robo`` must still work there -- but it is *not* silent: the
+    shadowing hint is emitted as a warning, so a developer whose editable install
+    is hidden by the checkout sees the cause instead of missing presets.
+    """
     try:
         require_apxinf()
+    except ApxinfShadowedError as error:
+        global _shadow_warned
+        if not _shadow_warned:  # the package asks several times while importing
+            _shadow_warned = True
+            warnings.warn(str(error), RuntimeWarning, stacklevel=2)
+        return False
     except ImportError:
         return False
     return True
