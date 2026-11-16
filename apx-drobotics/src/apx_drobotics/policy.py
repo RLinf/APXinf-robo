@@ -131,6 +131,12 @@ class DroboticsPolicy:
         if len(image_keys) != views or len(set(image_keys)) != views:
             problems.append(f"image_keys {list(image_keys)}: need {views} distinct camera keys")
         problems += _camera_problems(loaded, image_keys)
+        if state_key in image_keys or prompt_key in image_keys or state_key == prompt_key:
+            # Preprocess refuses this too; checking here fails before the worker starts.
+            problems.append(
+                f"image keys {list(image_keys)}, state key {state_key!r} and prompt key "
+                f"{prompt_key!r} must all be different"
+            )
         for name, value in (("action_dim", action_dim), ("state_dim", state_dim),
                             ("precision", precision)):
             if value is not None and value != facts[name]:
@@ -158,22 +164,30 @@ class DroboticsPolicy:
 
         own["worker_sha256"] = contract_lib.sha256_file(executable)
         timeouts = loaded["timeouts"]
+        # Built before the worker starts: they are cheap, and a configuration they refuse
+        # must not cost a model load.
+        preprocess = Preprocess(loaded, image_keys=image_keys, state_key=state_key,
+                                prompt_key=prompt_key)
+        postprocess = Postprocess(loaded)
         logger.info("starting worker %s", executable)
         process = Worker.start(
             executable, root / loaded["runtime_config"]["path"],
             ready_timeout=float(timeouts["ready_seconds"] if ready_timeout is None else ready_timeout),
         )
-        return cls(
-            loaded,
-            process,
-            preprocess=Preprocess(loaded, image_keys=image_keys, state_key=state_key,
-                                  prompt_key=prompt_key),
-            postprocess=Postprocess(loaded),
-            metadata={**extra, **own, "oellm_version": process.version},
-            infer_deadline=float(
-                timeouts["infer_deadline_seconds"] if infer_deadline is None else infer_deadline
-            ),
-        )
+        try:
+            return cls(
+                loaded,
+                process,
+                preprocess=preprocess,
+                postprocess=postprocess,
+                metadata={**extra, **own, "oellm_version": process.version},
+                infer_deadline=float(
+                    timeouts["infer_deadline_seconds"] if infer_deadline is None else infer_deadline
+                ),
+            )
+        except BaseException:
+            process.close()  # never leave a loaded worker behind a failed construction
+            raise
 
     @property
     def action_dim(self) -> int:

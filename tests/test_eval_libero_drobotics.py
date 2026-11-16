@@ -31,6 +31,7 @@ METADATA = {
     "contract_sha256": "a" * 64,
     "worker_sha256": "b" * 64,
     "apx_drobotics_version": "0.1.0",
+    "hashes_verified": False,
     "precision": "w8",
     "image_keys": ["observation/image", "observation/wrist_image"],
     "state_key": "observation/state",
@@ -284,7 +285,14 @@ def test_identity_records_what_the_engine_publishes():
         "contract_sha256": "a" * 64,
         "worker_sha256": "b" * 64,
         "apx_drobotics_version": "0.1.0",
+        "hashes_verified": False,
     }
+
+
+def test_identity_tells_audited_from_unaudited_hashes():
+    audited = eval_libero.run_identity(_args(), {**METADATA, "hashes_verified": True})
+    assert audited != eval_libero.run_identity(_args(), METADATA)
+    assert audited["hashes_verified"] is True
 
 
 @pytest.mark.parametrize("metadata", [None, {}, {"model_type": "pi05", "precision": "bf16"}])

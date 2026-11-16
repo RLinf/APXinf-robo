@@ -240,3 +240,43 @@ def test_contract_without_required_metadata_is_a_deployment_error(tmp_path):
         DroboticsPolicy.from_deployment(
             fake.sdk_root, **KEYS, contract=broken, worker=str(fake.worker)
         )
+
+
+def test_key_clash_fails_before_the_worker_starts(tmp_path, monkeypatch):
+    """A refused configuration must not cost a model load, nor leave a worker behind."""
+    from apx_drobotics import policy as policy_module
+
+    def no_start(*args, **kwargs):
+        raise AssertionError("the worker was started for a configuration that is refused")
+
+    monkeypatch.setattr(policy_module.Worker, "start", no_start)
+    fake = fake_deployment(tmp_path)
+    for keys in (
+        {**KEYS, "state_key": KEYS["image_keys"][0]},
+        {**KEYS, "prompt_key": KEYS["state_key"]},
+        {**KEYS, "prompt_key": KEYS["image_keys"][1]},
+    ):
+        with pytest.raises(ValueError, match="must all be different"):
+            DroboticsPolicy.from_deployment(fake.sdk_root, **keys, **fake.options)
+
+
+def test_worker_is_closed_if_construction_fails_after_it_started(tmp_path, monkeypatch):
+    from apx_drobotics import policy as policy_module
+
+    closed = []
+    real_close = policy_module.Worker.close
+
+    def spy_close(self):
+        closed.append(self)
+        real_close(self)
+
+    def refuse(self, *args, **kwargs):
+        raise RuntimeError("construction failed")
+
+    monkeypatch.setattr(policy_module.Worker, "close", spy_close)
+    monkeypatch.setattr(DroboticsPolicy, "__init__", refuse)
+    fake = fake_deployment(tmp_path)
+    with pytest.raises(RuntimeError, match="construction failed"):
+        DroboticsPolicy.from_deployment(fake.sdk_root, **KEYS, **fake.options)
+    assert len(closed) == 1
+    assert closed[0]._replies is None  # really stopped, not just asked to

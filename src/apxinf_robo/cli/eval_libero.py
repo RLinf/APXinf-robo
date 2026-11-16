@@ -144,6 +144,9 @@ _CONTRACT_IDENTITY = (
     # The contract hash covers the model files, not the code that drives them: a rebuilt
     # worker or a newer apx_drobotics must not resume an older ledger.
     "worker_sha256", "apx_drobotics_version",
+    # Without it ``contract_sha256`` only implies matching file sizes (see the docstring
+    # of ``run_identity``), so an audited run and an unaudited one must not share a ledger.
+    "hashes_verified",
 )
 
 
@@ -153,8 +156,11 @@ def run_identity(args: argparse.Namespace, metadata: Optional[dict] = None) -> d
     A resumed evaluation must not mix rows produced by different settings into
     one success rate. Every row records this, and :func:`completed_runs` refuses
     a ledger whose rows disagree with the current run. An engine that publishes a
-    ``contract_sha256`` in its ``metadata`` is pinned by it: the hash stands for
-    the SDK, model files and pre/post-processing, so it covers the model checksums.
+    ``contract_sha256`` in its ``metadata`` is pinned by it: the hash
+    stands for the contract's expected SDK and model checksums and its pre/post-processing.
+    It says what the files should be, not that they were checked: unless the engine
+    re-hashed them (``hashes_verified``, recorded in the identity), only their presence
+    and byte sizes were compared.
     """
     identity = {
         "replan_steps": args.replan_steps,
