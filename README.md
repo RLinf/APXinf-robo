@@ -238,9 +238,10 @@ application supplies its own processing or needs a network service.
 | `load_bare_model` | Preprocessed images, tokens, noise | Normalized model actions |
 | `websocket_server` | A policy and listening address | OpenPI-compatible service |
 
-`load_policy`, `load_bare_model` and `websocket_server` are ApxInf's own
-implementations. They are exported only where ApxInf is installed; on the S600 board
-use `build_robot_policy(..., engine="drobotics")`.
+`load_policy` and `websocket_server` take `engine="apxinf"` (default) or
+`"drobotics"`. `load_bare_model` and the checkpoint preflight are ApxInf-only: they are
+always importable names, and using one without ApxInf raises its install hint. Nothing in
+the package probes for ApxInf to decide what to offer.
 
 ### Engines
 
@@ -253,16 +254,22 @@ An engine is whatever runs the model. Two exist:
 
 Both return a policy of the shape in `apxinf_robo.protocol`, taking observations
 under the same keys, but they are not interchangeable in every respect: the S600
-policy has no `noise=`, runs only presets without robot pre/post steps
-(`franka_libero`), and does not return `normalized_actions`. Options only ApxInf can
+policy has no `noise=` and does not return `normalized_actions`. A preset's robot
+pre/post transform is engine-neutral and wraps either policy, so what decides whether a
+preset can run on the S600 is that deployment's contract (camera count, state and action
+width), not whether the preset has a transform. Options only ApxInf can
 honour (`--seed`, `--device`, `--checkpoint`, `--calibration`, …) are refused under
 `--engine drobotics` rather than ignored.
 
-To add an engine: write `engine_<name>.py` exposing `load_policy` and
-`websocket_server`, add its name to `ENGINES` in `presets.py`, and add a branch in
-`build_robot_policy`. The engine choice is still a hard-coded branch in three places
-(`ENGINES`, `build_robot_policy`, the CLIs' option lists); a capability registry is
-the longer-term fix.
+ApxInf is optional: installing or importing `apxinf_robo`, reading every robot preset and
+running the S600 path need no ApxInf, and never try to import it. The ApxInf path likewise
+needs no `apx-drobotics`. CI enforces both with a hook that turns an import attempt into a
+test failure (`APXINF_ROBO_FORBID_IMPORT`), not an `ImportError` a probe could swallow.
+
+To add an engine: write `engine_<name>.py` exposing `load_policy` and `websocket_server`,
+and add its name and a branch to `engines.py`, the only module that selects one. The CLIs'
+list of engine-specific options is still a per-engine table; a capability registry is the
+longer-term fix.
 
 ### L1 — bare model
 

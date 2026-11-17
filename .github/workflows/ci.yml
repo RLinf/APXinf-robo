@@ -46,3 +46,20 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev]" -e ./apxinf/python/apxinf pillow msgpack websockets openpi-client typing-extensions
       - run: pytest -rs tests --ignore=tests/test_serve_drobotics.py --ignore=tests/test_eval_libero_drobotics.py
+
+  engine-contract:
+    # Both engines installed, so the shared behaviour contract runs on both halves of its
+    # parametrization. The other two jobs each see only one half, by design.
+    runs-on: ubuntu-latest
+    env:
+      APXINF_ROBO_REQUIRE_OPTIONAL: "1"
+      APXINF_ROBO_REQUIRE_BOTH: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,drobotics-test]" -e ./apxinf/python/apxinf -e "./apx-drobotics[serve]"
+      - run: pytest -rs tests/test_engine_contract.py
