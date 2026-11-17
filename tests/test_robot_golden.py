@@ -144,3 +144,66 @@ def test_g1_wrapper_matches_the_with_adapter_chain():
     # The model saw the decoded state: what the old chain's tokenizer was handed.
     np.testing.assert_array_equal(inner.seen[0][KEY], GOLDEN["g1_policy/tokenizer_state"])
     assert result["normalized_actions"] == "passthrough"
+
+
+@pytest.mark.parametrize("case", ["f64", "f32"])
+def test_yam_transform_reproduces_golden(case):
+    from apxinf_robo.embodiments.yam_transform import YamTransform
+
+    state, raw = GOLDEN[f"yam/{case}/state"], GOLDEN[f"yam/{case}/raw"]
+    kept = raw.copy()
+    transform = YamTransform(KEY)
+    obs = {KEY: state}
+    assert transform.before(obs) is obs
+    _same(transform.after(raw, obs), GOLDEN[f"yam/{case}/out"])
+    np.testing.assert_array_equal(raw, kept)
+
+
+@pytest.mark.parametrize("case", ["f64", "f32"])
+def test_dual_franka_transform_reproduces_golden(case):
+    from apxinf_robo.embodiments.dual_franka_transform import DualFrankaTransform
+
+    state, raw = GOLDEN[f"dual_franka/{case}/state"], GOLDEN[f"dual_franka/{case}/raw"]
+    kept = (state.copy(), raw.copy())
+    transform = DualFrankaTransform(KEY)
+    prepared = transform.before({KEY: state})
+    _same(prepared[KEY], GOLDEN[f"dual_franka/{case}/reordered"])
+    _same(transform.after(raw, prepared), GOLDEN[f"dual_franka/{case}/out"])
+    np.testing.assert_array_equal(state, kept[0])
+    np.testing.assert_array_equal(raw, kept[1])
+
+
+def test_yam_and_dual_franka_wrappers_over_a_fake_engine():
+    from apxinf_robo.embodiments.dual_franka_transform import DualFrankaTransform
+    from apxinf_robo.embodiments.yam_transform import YamTransform
+    from apxinf_robo.protocol import TransformedPolicy
+
+    for body, transform, width in (("yam", YamTransform(KEY), 14),
+                                   ("dual_franka", DualFrankaTransform(KEY), 20)):
+        raw = GOLDEN[f"{body}/f64/raw"]
+        inner = _ConstantPolicy(raw)
+        policy = TransformedPolicy(inner, transform, action_dim=width)
+        key = "out"
+        result = policy.infer({KEY: GOLDEN[f"{body}/f64/state"]})
+        _same(result["actions"], GOLDEN[f"{body}/f64/{key}"])
+        # The model is handed the transformed state: reordered for dual-Franka.
+        seen = inner.seen[0][KEY]
+        np.testing.assert_array_equal(
+            seen, GOLDEN["dual_franka/f64/reordered"] if body == "dual_franka"
+            else GOLDEN["yam/f64/state"])
+
+
+def test_yam_and_dual_franka_keep_their_input_checks():
+    from apxinf_robo.embodiments.dual_franka_transform import DualFrankaTransform
+    from apxinf_robo.embodiments.yam_transform import YamTransform
+
+    with pytest.raises(ValueError, match="14-value"):
+        YamTransform(KEY).after(np.zeros((30, 32)), {KEY: np.zeros(13)})
+    with pytest.raises(ValueError, match="action chunk"):
+        YamTransform(KEY).after(np.zeros((30, 13)), {KEY: np.zeros(14)})
+    with pytest.raises(KeyError):  # never ships unresolved deltas
+        YamTransform(KEY).after(np.zeros((30, 32)), {})
+    with pytest.raises(ValueError, match="20-value"):
+        DualFrankaTransform(KEY).before({KEY: np.zeros(19)})
+    with pytest.raises(ValueError, match="action chunk"):
+        DualFrankaTransform(KEY).after(np.zeros((2, 19)), {KEY: np.ones(20)})

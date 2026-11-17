@@ -18,35 +18,21 @@ from apxinf.processors.base import ProcessorStep
 from apxinf.processors.transforms import ACTIONS, OBSERVATION, lookup_key
 
 from .base import Embodiment
+from .yam_transform import YAM_DELTA_MASK, YAM_DIM, yam_absolute_actions  # noqa: F401
 
 __all__ = ["YAM_BODY", "build_yam_policy"]
 
-YAM_DIM = 14
-YAM_DELTA_MASK = np.array([True] * 6 + [False] + [True] * 6 + [False])
 
 
 class YamAbsoluteActions(ProcessorStep):
-    """Restore absolute joints and strip model padding, preserving grippers.
-
-    Each prediction is relative to the observation, not the previous timestep
-    in the chunk. Missing state is an error: sending unresolved deltas to the
-    absolute-position controller would change the meaning of the action.
-    """
+    """ApxInf shell over :func:`~apxinf_robo.embodiments.yam_transform.yam_absolute_actions`."""
 
     def __init__(self, state_key: str):
         self.state_key = state_key
 
     def __call__(self, data: MutableMapping[str, Any]) -> MutableMapping[str, Any]:
-        state = np.asarray(lookup_key(data[OBSERVATION], self.state_key))
-        if state.shape != (YAM_DIM,) or not np.isfinite(state).all():
-            raise ValueError("YAM requires a finite 14-value joint state")
-        raw = np.asarray(data[ACTIONS])
-        if raw.ndim != 2 or raw.shape[1] < YAM_DIM or not np.isfinite(raw).all():
-            raise ValueError("YAM requires a finite [horizon, >=14] action chunk")
-        actions = raw[:, :YAM_DIM].copy()
-        offset = np.where(YAM_DELTA_MASK, state, 0)
-        actions[...] = actions + offset
-        data[ACTIONS] = actions
+        state = lookup_key(data[OBSERVATION], self.state_key)
+        data[ACTIONS] = yam_absolute_actions(data[ACTIONS], state)
         return data
 
 
