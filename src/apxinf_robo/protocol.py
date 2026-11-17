@@ -10,11 +10,15 @@ observation dict under the preset's wire keys. Everything specific to a model, s
 resizing or tokenizing, happens inside the policy. A new engine is therefore one
 ``engine_<name>.py`` next to :mod:`apxinf_robo.engine`.
 
-These values restate ApxInf's own (``apxinf.policies.base``).
+These values restate ApxInf's own (``apxinf.policies.base``). They are the defaults robo
+owns; ApxInf does not import them back. A model's camera slots and their order are the
+checkpoint's or the deployment contract's to say, not these constants'; a drift test
+(``tests/test_protocol.py``) holds the two copies together where ApxInf is installed.
 """
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, Mapping, Optional, Protocol, runtime_checkable
 
 import numpy as np
@@ -24,6 +28,8 @@ __all__ = [
     "CANONICAL_PROMPT_KEY",
     "CANONICAL_STATE_KEY",
     "Policy",
+    "RobotTransform",
+    "TransformedPolicy",
     "VIEW_SLOTS",
 ]
 
@@ -58,3 +64,89 @@ class Policy(Protocol):
     ) -> Dict[str, Any]: ...
 
     def close(self) -> None: ...
+
+
+class RobotTransform(Protocol):
+    """A body's arithmetic around a model, independent of what runs the model.
+
+    ``before`` rewrites the client's observation on the way in (G1 decodes its state,
+    dual-Franka reorders it) and ``after`` turns the model's deployable actions into the
+    body's (delta to absolute, then truncate or re-encode). Both are pure: ``before``
+    returns a new mapping and never touches its argument, and ``after`` is handed
+    ``before``'s output, so a delta resolves against the same state the model saw.
+
+    ``after`` receives actions in the engine's deployable domain: unnormalized
+    ``[horizon, width]``, not clipped or re-encoded for any body. ``min_input_dim`` is the
+    narrowest such chunk it can work on.
+    """
+
+    #: Narrowest engine action width ``after`` accepts.
+    min_input_dim: int
+
+    def before(self, observation: Mapping[str, Any]) -> Mapping[str, Any]: ...
+
+    def after(self, actions: np.ndarray, observation: Mapping[str, Any]) -> np.ndarray: ...
+
+
+class TransformedPolicy:
+    """``transform.before -> inner.infer -> transform.after``, as one :class:`Policy`.
+
+    This is how a body reaches either engine: the wrapper needs only ``inner`` to satisfy
+    :class:`Policy`. Everything else in the result (``normalized_actions``, ``token_ids``,
+    whatever the engine adds) passes through untouched, and ``timing`` keeps the engine's
+    entries with the transform's own time added to ``total_ms`` and reported as
+    ``robot_ms``.
+
+    The caller owns ``inner`` until construction succeeds: if this raises, close ``inner``.
+    Afterwards ``close()`` closes it.
+    """
+
+    def __init__(
+        self,
+        inner: Policy,
+        transform: RobotTransform,
+        *,
+        action_dim: Optional[int] = None,
+        metadata: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        if inner.action_dim < transform.min_input_dim:
+            raise ValueError(
+                f"the robot transform needs actions at least {transform.min_input_dim} wide, "
+                f"but the engine's policy produces {inner.action_dim}"
+            )
+        self._inner = inner
+        self._transform = transform
+        self._action_dim = int(inner.action_dim if action_dim is None else action_dim)
+        self.metadata: Dict[str, Any] = {
+            **dict(inner.metadata),
+            **(dict(metadata) if metadata else {}),
+            "action_dim": self._action_dim,
+        }
+
+    @property
+    def action_dim(self) -> int:
+        return self._action_dim
+
+    @property
+    def action_horizon(self) -> int:
+        return self._inner.action_horizon
+
+    def infer(
+        self, observation: Mapping[str, Any], *, noise: Optional[np.ndarray] = None
+    ) -> Dict[str, Any]:
+        started = time.perf_counter()
+        prepared = self._transform.before(observation)
+        robot_ms = (time.perf_counter() - started) * 1000.0
+        # ``noise`` is forwarded only when given: an engine that owns its noise rejects it.
+        result = dict(self._inner.infer(prepared, **({} if noise is None else {"noise": noise})))
+        started = time.perf_counter()
+        result["actions"] = self._transform.after(result["actions"], prepared)
+        robot_ms += (time.perf_counter() - started) * 1000.0
+        timing = dict(result.get("timing", {}))
+        timing["robot_ms"] = robot_ms
+        timing["total_ms"] = timing.get("total_ms", 0.0) + robot_ms
+        result["timing"] = timing
+        return result
+
+    def close(self) -> None:
+        self._inner.close()

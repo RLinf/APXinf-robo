@@ -90,10 +90,23 @@ def _g1_policy(rng, out):
 
     policy = build_g1_mock_policy()
     policy.model_runner._value = 0.3
+    # What the engine's own chain hands the robot steps: the input of g1_absolute.
+    seen = []
+    original = UnitreeG1AbsoluteActions.__call__
+
+    def capture(self, data):
+        seen.append(np.array(data[ACTIONS]))
+        return original(self, data)
+
+    UnitreeG1AbsoluteActions.__call__ = capture
     state = rng.normal(size=16).astype(np.float32)
-    result = policy.infer(g1_observation(state))
+    try:
+        result = policy.infer(g1_observation(state))
+    finally:
+        UnitreeG1AbsoluteActions.__call__ = original
     assert G1_STATE_KEY == KEY
     out["g1_policy/state"] = state
+    out["g1_policy/model_actions"] = seen[0]
     out["g1_policy/actions"] = result["actions"]
     out["g1_policy/normalized"] = result["normalized_actions"]
     out["g1_policy/tokenizer_state"] = policy.tokenizer.seen_states[0]
