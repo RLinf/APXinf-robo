@@ -1,6 +1,7 @@
 """Regenerate ``robot_golden.npz``: the robot transforms' outputs on fixed inputs.
 
-Run this **only against the pre-refactor commit (55760e2)**, where the transforms are
+Run this **only against the pre-refactor commit (55760e2)** (it imports the ProcessorStep
+classes that the refactor removed, so it cannot run later), where the transforms are
 still ApxInf ``ProcessorStep`` classes wired through ``with_adapter``. The file it writes
 is the oracle the engine-neutral transforms are held to afterwards, so regenerating it
 from the refactored code would make that comparison vacuous.

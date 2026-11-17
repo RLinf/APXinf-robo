@@ -21,7 +21,7 @@ import time
 import numpy as np
 import pytest
 
-from _require import require
+from _require import needs_apxinf, require
 
 require("msgpack")
 require("websockets")
@@ -31,13 +31,6 @@ testing = require("apx_drobotics.testing")
 from openpi_client import image_tools, websocket_client_policy  # noqa: E402
 
 from apxinf_robo.cli import eval_libero, serve  # noqa: E402
-
-#: These exercise the ApxInf path, which the S600 CI job deliberately does not install.
-needs_apxinf = pytest.mark.skipif(
-    importlib.util.find_spec("apxinf") is None or getattr(
-        importlib.import_module("apxinf"), "__file__", None) is None,
-    reason="needs ApxInf",
-)
 
 NO_APXINF = pathlib.Path(__file__).with_name("_no_apxinf.py")
 

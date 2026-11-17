@@ -61,8 +61,8 @@ MY_KEYS = register_convention(
 # preflight compares norm_stats against. They need not match: a Franka under
 # LIBERO has 8-dim state and a 7-dim EEF-delta action.
 #
-# No builder is given, so this body gets the generic one -- the stock policy with
-# no robot-specific pre/post steps, which is why has_robot_steps is False below.
+# No transform is given, so the engine's own output is what the robot takes -- no
+# robot-specific pre/post arithmetic, which is why has_transform is False below.
 MY_ARM = Embodiment(
     name="myarm",
     num_cameras=2,
@@ -103,7 +103,7 @@ def main() -> None:
     print("resolved by alias :", get_robot_preset("myarm").name)
     print("describe          :", MY_ROBOT.describe())
     print(f"num_views={MY_ROBOT.num_views} action_dim={MY_ROBOT.action_dim} "
-          f"state_dim={MY_ROBOT.state_dim} has_robot_steps={MY_ROBOT.has_robot_steps}")
+          f"state_dim={MY_ROBOT.state_dim} has_transform={MY_ROBOT.has_transform}")
 
     observation = observation_for_preset(MY_ROBOT)
     print("an observation this preset accepts:",

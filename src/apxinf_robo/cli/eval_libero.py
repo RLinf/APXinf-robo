@@ -795,7 +795,7 @@ def run_episode(
 
 
 def build_parser() -> argparse.ArgumentParser:
-    from ..presets import ENGINES
+    from ..engines import ENGINES
 
     parser = argparse.ArgumentParser(
         prog="apxinf-robo eval-libero",

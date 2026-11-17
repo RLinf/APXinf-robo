@@ -130,6 +130,8 @@ class G1Transform:
         self.state_key = state_key
         self.use_delta_joint_actions = use_delta_joint_actions
         self.adapt_to_pi = adapt_to_pi
+        #: ``encode_actions`` truncates to 16; without it the model's width is left alone.
+        self.output_dim = G1_ROBOT_DIM if adapt_to_pi else None
 
     def before(self, observation: Mapping[str, Any]) -> Mapping[str, Any]:
         if not self.adapt_to_pi:

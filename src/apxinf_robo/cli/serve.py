@@ -40,15 +40,9 @@ from typing import Optional
 
 from .. import engine_drobotics
 from ..embodiments.base import ROBOT_PRESETS, available_robots, get_robot_preset
-from ..engine import (
-    apxinf_available,
-    load_policy,
-    load_random_model,
-    policy_from_random,
-    resolve_tactics,
-    websocket_server,
-)
-from ..presets import ENGINES, build_robot_policy
+from ..engine import load_policy, load_random_model, policy_from_random, resolve_tactics
+from ..engines import ENGINES, websocket_server
+from ..presets import build_robot_policy
 from ._engine_options import explicit_flags, refusal
 
 DEFAULT_ROBOT = "franka_libero"
@@ -67,13 +61,16 @@ _APXINF_ONLY = (
 _APXINF_DEFAULTS = {"ckpt_format": "auto", "norm_key": "actions", "device": "cuda:0", "seed": 0}
 
 
-def _checkpoint_formats():
-    """``--ckpt-format`` choices. ApxInf defines them, and it only applies to ApxInf."""
-    if not apxinf_available():
-        return None
+def _check_checkpoint_format(value: str) -> None:
+    """Validate ``--ckpt-format``. ApxInf defines the formats, so this runs only on its path.
+
+    Not an argparse ``choices=``: building that list would import ApxInf while the parser
+    is built, before any engine has been chosen.
+    """
     from apxinf.checkpoints import FORMATS
 
-    return FORMATS
+    if value not in FORMATS:
+        raise ValueError(f"--ckpt-format {value!r} is not one of {list(FORMATS)}")
 
 
 def _json_options(value: str) -> dict:
@@ -160,7 +157,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--ckpt-format",
-        choices=_checkpoint_formats(),
         default=None,
         help="ApxInf only. How to read MODEL_DIR. 'auto' (default) picks openpi_pytorch when a "
         "metadata.pt is present and lerobot when a config.json is. Pin it when a "
@@ -307,7 +303,7 @@ def _serve_drobotics(args: argparse.Namespace) -> int:
         logging.error("%s", error)
         return 2
     try:
-        return engine_drobotics.websocket_server(policy, args.host, args.port).serve_forever()
+        return websocket_server(policy, args.host, args.port, engine="drobotics").serve_forever()
     finally:
         policy.close()
 
@@ -331,6 +327,8 @@ def run(args: argparse.Namespace) -> Optional[int]:
         raise ValueError("pass --model-dir, or --random-weights for a checkpoint-free engine")
     if args.random_weights and args.model_dir is not None:
         raise ValueError("--random-weights is checkpoint-free; do not also pass --model-dir")
+    if args.ckpt_format != "auto":
+        _check_checkpoint_format(args.ckpt_format)
 
     if not args.random_weights:
         from apxinf.policies.auto import _read_model_type
@@ -390,7 +388,7 @@ def run(args: argparse.Namespace) -> Optional[int]:
         served_dim = trim_dim or model_dim
         # The synthetic path reproduces the preset's wire keys and view count and
         # nothing else: the tokenizer emits a fixed token stream and never reads
-        # state, and preset.builder never runs. The published metadata is the wire
+        # state, and the preset's transform never runs. The published metadata is the wire
         # contract, so name every gap and mark robot_steps=False below -- silently
         # serving half an embodiment under its own name is precisely the mismatch
         # --robot exists to prevent.

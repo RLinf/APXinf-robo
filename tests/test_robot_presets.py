@@ -43,7 +43,6 @@ os.environ["no_proxy"] = "127.0.0.1,localhost"
 # Engine side: the model, the pipeline machinery, the transport. Nothing here
 # knows a robot exists -- that asymmetry is half of what these tests assert.
 from apxinf import Pi05Policy
-from apxinf.policies.base import ComposablePolicy
 from apxinf.policies.impls import pi05 as pi05_module
 from apxinf.processors import (
     Normalizer,
@@ -98,12 +97,10 @@ from apxinf_robo.embodiments.base import (
 )
 from apxinf_robo.embodiments.unitree_g1 import build_unitree_g1_policy
 from apxinf_robo.embodiments.unitree_g1 import builder as robot_adapter
-from apxinf_robo.embodiments.unitree_g1.steps import (
-    G1_ROBOT_DIM,
-    UnitreeG1AbsoluteActions,
-    UnitreeG1DecodeState,
-    UnitreeG1EncodeActions,
-)
+from apxinf_robo import engine as engine_module
+from apxinf_robo import presets as presets_module
+from apxinf_robo.protocol import TransformedPolicy, apply_transform
+from apxinf_robo.embodiments.unitree_g1.transform import G1_ROBOT_DIM, G1Transform
 from apxinf_robo.presets import build_robot_policy
 
 # The G1 client's wire keys are a recording convention, not a fact about the
@@ -242,7 +239,7 @@ class RobotPresetTest(unittest.TestCase):
         repaired = RobotPreset(name="franka_droid_like", embodiment=franka, convention=droid_like)
         self.assertEqual(repaired.image_keys, droid_like.image_keys)
         self.assertEqual(repaired.action_dim, 7)
-        self.assertIs(repaired.builder, get_robot_preset("franka_libero").builder)
+        self.assertIs(repaired.transform, get_robot_preset("franka_libero").transform)
 
     def test_unknown_robot_names_the_known_ones(self) -> None:
         with self.assertRaises(KeyError) as caught:
@@ -255,15 +252,15 @@ class SyntheticContractTest(unittest.TestCase):
     """A checkpoint-free server may serve a preset's keys, not its arithmetic.
 
     ``--random-weights --robot unitree_g1`` runs ``Pi05Policy.from_random``, which
-    never calls ``preset.builder``: the wire keys and view count are real, the
+    never applies the preset's transform: the wire keys and view count are real, the
     action semantics are absent. Publishing the preset name unqualified would be
     the silent embodiment mismatch ``--robot`` exists to prevent, so every gap is
     named at startup and ``robot_steps`` goes on the wire.
     """
 
-    def test_only_a_builder_preset_reports_robot_steps(self) -> None:
-        self.assertFalse(get_robot_preset("franka_libero").has_robot_steps)
-        self.assertTrue(get_robot_preset("unitree_g1").has_robot_steps)
+    def test_only_a_transform_preset_reports_robot_steps(self) -> None:
+        self.assertFalse(get_robot_preset("franka_libero").has_transform)
+        self.assertTrue(get_robot_preset("unitree_g1").has_transform)
 
     def test_a_generic_preset_that_drops_state_has_nothing_to_report(self) -> None:
         preset = get_robot_preset("franka_libero")
@@ -284,12 +281,12 @@ class SyntheticContractTest(unittest.TestCase):
         self.assertEqual(len(gaps), 2)
         joined = " ".join(gaps)
         self.assertIn("discrete_state", joined)
-        # The gap must name the factory that was skipped and the concrete symptom:
-        # a 32-wide action where the real server truncates to 16.
-        self.assertIn("build_unitree_g1_policy", joined)
+        # The gap must name what was skipped and the concrete symptom: a 32-wide
+        # action where the real server truncates to 16.
+        self.assertIn("transform", joined)
         self.assertIn(str(MODEL_DIM), joined)
 
-    def test_a_preset_whose_builder_owns_no_truncation_omits_the_width_gap(self) -> None:
+    def test_a_preset_whose_transform_owns_no_truncation_omits_the_width_gap(self) -> None:
         # action_dim set means the width is the preset's, not a skipped step's, so
         # the synthetic server serves the right one and must not claim otherwise.
         preset = RobotPreset(
@@ -298,13 +295,42 @@ class SyntheticContractTest(unittest.TestCase):
                 name="stub_body",
                 num_cameras=1,
                 action_dim=7,
-                builder=lambda model_dir, **kwargs: None,
+                transform=lambda state_key: _IdentityTransform(),
             ),
             convention=Convention(name="stub_keys", image_keys=("cam",), state_key="state"),
         )
         gaps = preset.synthetic_gaps(discrete_state=False, served_action_dim=7)
         self.assertEqual(len(gaps), 1)
         self.assertNotIn("action_dim", gaps[0])
+
+
+class _IdentityTransform:
+    """A transform that changes nothing, for tests of the plumbing around it."""
+
+    min_input_dim = 1
+    output_dim = None
+
+    def before(self, observation):
+        return observation
+
+    def after(self, actions, observation):
+        return actions
+
+
+class _StubPolicy:
+    """Policy-shaped stand-in for a loaded engine policy; counts ``close()``."""
+
+    def __init__(self, action_dim: int = MODEL_DIM) -> None:
+        self.action_dim = action_dim
+        self.action_horizon = HORIZON
+        self.metadata: dict = {}
+        self.closed = 0
+
+    def infer(self, observation, *, noise=None):
+        return {"actions": np.zeros((HORIZON, self.action_dim)), "timing": {"total_ms": 0.0}}
+
+    def close(self) -> None:
+        self.closed += 1
 
 
 class BuildRobotPolicyTest(unittest.TestCase):
@@ -314,7 +340,14 @@ class BuildRobotPolicyTest(unittest.TestCase):
         ROBOT_PRESETS[preset.name] = preset
         self.addCleanup(ROBOT_PRESETS.pop, preset.name, None)
 
-    def test_preset_defaults_and_builder_kwargs_reach_the_builder(self) -> None:
+    def _recording_loader(self, seen: dict, policy=None):
+        def load(engine, model_dir, **kwargs):
+            seen.update(kwargs, engine=engine, model_dir=model_dir)
+            return policy if policy is not None else _StubPolicy()
+
+        return mock.patch.object(presets_module, "load_engine_policy", load)
+
+    def test_preset_defaults_and_engine_options_reach_the_engine(self) -> None:
         seen: dict = {}
         preset = RobotPreset(
             name="stub_robot",
@@ -322,8 +355,8 @@ class BuildRobotPolicyTest(unittest.TestCase):
                 name="stub_body",
                 num_cameras=2,
                 action_dim=None,
-                builder=lambda model_dir, **kwargs: seen.update(kwargs, model_dir=model_dir),
-                builder_kwargs={"use_delta_joint_actions": True},
+                transform=lambda state_key: _IdentityTransform(),
+                engine_options={"apxinf": {"a_flag": True}, "drobotics": {"other": 1}},
             ),
             convention=Convention(
                 name="stub_keys",
@@ -334,18 +367,21 @@ class BuildRobotPolicyTest(unittest.TestCase):
         )
         self._register(preset)
 
-        build_robot_policy("stub_robot", "/nowhere", metadata={"precision": "bf16"})
+        with self._recording_loader(seen):
+            policy = build_robot_policy("stub_robot", "/nowhere", metadata={"precision": "bf16"})
 
+        self.assertEqual(seen["engine"], "apxinf")
         self.assertEqual(seen["model_dir"], "/nowhere")
         self.assertEqual(seen["image_keys"], ("cam/high", "cam/wrist"))
         self.assertEqual(seen["state_key"], "joints")
         self.assertIsNone(seen["action_dim"])
         self.assertTrue(seen["discrete_state"])
-        self.assertTrue(seen["use_delta_joint_actions"])
-
-        published = seen["metadata"]
+        # Another engine's options are not this engine's business.
+        self.assertTrue(seen["a_flag"])
+        self.assertNotIn("other", seen)
+        published = policy.metadata
         self.assertEqual(published["robot"], "stub_robot")
-        # A robot-step preset loaded from a checkpoint gets its arithmetic, so the
+        # A transform preset loaded from a checkpoint gets its arithmetic, so the
         # flag the synthetic path clears is set here.
         self.assertTrue(published["robot_steps"])
         self.assertEqual(
@@ -358,12 +394,7 @@ class BuildRobotPolicyTest(unittest.TestCase):
         seen: dict = {}
         preset = RobotPreset(
             name="stub_generic",
-            embodiment=Embodiment(
-                name="stub_body",
-                num_cameras=1,
-                action_dim=7,
-                builder=lambda model_dir, **kwargs: seen.update(kwargs),
-            ),
+            embodiment=Embodiment(name="stub_body", num_cameras=1, action_dim=7),
             convention=Convention(
                 name="stub_keys",
                 image_keys=("observation/image",),
@@ -372,9 +403,10 @@ class BuildRobotPolicyTest(unittest.TestCase):
         )
         self._register(preset)
 
-        build_robot_policy(
-            "stub_generic", "/nowhere", image_keys=["rgb/front"], state_key="q"
-        )
+        with self._recording_loader(seen):
+            build_robot_policy(
+                "stub_generic", "/nowhere", image_keys=["rgb/front"], state_key="q"
+            )
 
         self.assertEqual(seen["image_keys"], ("rgb/front",))
         self.assertEqual(seen["state_key"], "q")
@@ -382,6 +414,27 @@ class BuildRobotPolicyTest(unittest.TestCase):
         # robot_slots reports the *served* keys against the slots they fill, so an
         # override stays reviewable instead of hiding behind the preset name.
         self.assertEqual(seen["metadata"]["robot_slots"], [["base_0_rgb", "rgb/front"]])
+
+    def test_a_preset_without_a_transform_returns_the_engine_policy_itself(self) -> None:
+        engine_policy = _StubPolicy()
+        with self._recording_loader({}, engine_policy):
+            self.assertIs(build_robot_policy("franka_libero", "/nowhere"), engine_policy)
+
+    def test_a_failed_wrap_closes_the_engine_policy(self) -> None:
+        # G1's transform needs 16-wide actions; an 8-wide engine cannot feed it, and the
+        # loaded worker/handle must not be left behind.
+        narrow = _StubPolicy(action_dim=8)
+        with self._recording_loader({}, narrow):
+            with self.assertRaises(ValueError) as caught:
+                build_robot_policy("unitree_g1", "/nowhere")
+        self.assertIn("at least 16 wide", str(caught.exception))
+        self.assertEqual(narrow.closed, 1)
+
+    def test_a_transform_preset_refuses_an_action_width_it_does_not_produce(self) -> None:
+        with self.assertRaises(ValueError) as caught:
+            with self._recording_loader({}):
+                build_robot_policy("unitree_g1", "/nowhere", action_dim=7)
+        self.assertIn("16-value", str(caught.exception))
 
 
 class _Tag(ProcessorStep):
@@ -454,8 +507,8 @@ class RecordingTokenizer(PromptTokenizer):
 def build_g1_mock_policy() -> Pi05Policy:
     """A G1-wired policy over a mock model: the real pipelines, no checkpoint.
 
-    Takes the same route ``build_unitree_g1_policy`` does — a stock policy, then
-    ``with_adapter`` — but injects the model and an identity unnormalizer, so the
+    Takes the same route ``build_unitree_g1_policy`` does — a stock policy, then the G1
+    transform wrapped around it — but injects the model and an identity unnormalizer, so the
     assertions isolate the adapter's arithmetic from checkpoint norm_stats.
     """
     model = MockModel(num_views=len(G1_CAMERAS))
@@ -478,16 +531,13 @@ def build_g1_mock_policy() -> Pi05Policy:
         state_key=G1_STATE_KEY,
         metadata={"protocol": "openpi.websocket_policy"},
     )
-    policy = base.with_adapter(
-        before=[("g1_decode_state", UnitreeG1DecodeState(G1_STATE_KEY))],
-        after=[
-            ("g1_absolute", UnitreeG1AbsoluteActions(G1_STATE_KEY)),
-            ("g1_encode", UnitreeG1EncodeActions()),
-        ],
-        action_dim=G1_ROBOT_DIM,
+    policy = apply_transform(
+        base,
+        G1Transform(G1_STATE_KEY),
         metadata={"robot": "unitree_g1"},
     )
     policy.tokenizer = tokenizer
+    policy.model = model
     return policy
 
 
@@ -497,117 +547,13 @@ def _identity_unnormalizer() -> Unnormalizer:
     )
 
 
-class PolicyCompositionTest(unittest.TestCase):
-    """``Pi05Policy.with_adapter``: the seam a robot adapter wraps.
-
-    Its contract is nesting — ``before`` outside the model's whole input chain,
-    ``after`` outside its whole output chain — plus republishing what the wrapped
-    policy actually serves. Getting the second part wrong is the failure this
-    layer exists to prevent: a policy advertising an ``action_dim`` its steps do
-    not emit degrades silently on the wire.
-    """
-
-    def _base(self) -> Pi05Policy:
-        model = MockModel(num_views=len(G1_CAMERAS))
-        input_pipeline, output_pipeline = Pi05Policy.default_pipelines(
-            model,
-            tokenizer=RecordingTokenizer(),
-            unnormalizer=_identity_unnormalizer(),
-            image_keys=G1_CAMERAS,
-            state_key=G1_STATE_KEY,
-        )
-        return Pi05Policy(
-            model,
-            input_pipeline=input_pipeline,
-            output_pipeline=output_pipeline,
-            image_keys=G1_CAMERAS,
-            state_key=G1_STATE_KEY,
-            metadata={"protocol": "openpi.websocket_policy"},
-        )
-
-    def test_steps_land_outside_the_model_chain_in_both_directions(self) -> None:
-        base = self._base()
-        wrapped = base.with_adapter(
-            before=[("g1_decode_state", UnitreeG1DecodeState(G1_STATE_KEY))],
-            after=[("g1_encode", UnitreeG1EncodeActions())],
-            action_dim=G1_ROBOT_DIM,
-        )
-        self.assertEqual(wrapped.input_pipeline.names[0], "g1_decode_state")
-        self.assertEqual(wrapped.output_pipeline.names[-1], "g1_encode")
-        # The model's own steps keep their order and their names; the wrapper
-        # never had to learn what they are.
-        self.assertEqual(wrapped.input_pipeline.names[1:], base.input_pipeline.names)
-        self.assertEqual(wrapped.output_pipeline.names[:-1], base.output_pipeline.names)
-
-    def test_the_original_policy_is_not_mutated(self) -> None:
-        base = self._base()
-        base.with_adapter(
-            after=[("g1_encode", UnitreeG1EncodeActions())], action_dim=G1_ROBOT_DIM
-        )
-        self.assertNotIn("g1_encode", base.output_pipeline.names)
-        self.assertEqual(base.action_dim, MODEL_DIM)
-
-    def test_the_published_contract_describes_the_wrapped_chain(self) -> None:
-        wrapped = self._base().with_adapter(
-            after=[("g1_encode", UnitreeG1EncodeActions())],
-            action_dim=G1_ROBOT_DIM,
-            metadata={"robot": "unitree_g1"},
-        )
-        # The derived half is recomputed: inheriting the pre-adapter action_dim
-        # would publish a width no step in this chain produces.
-        self.assertEqual(wrapped.metadata["action_dim"], G1_ROBOT_DIM)
-        self.assertIn("g1_encode", wrapped.metadata["output_pipeline"])
-        # The caller's half is carried forward and extended.
-        self.assertEqual(wrapped.metadata["protocol"], "openpi.websocket_policy")
-        self.assertEqual(wrapped.metadata["robot"], "unitree_g1")
-
-    def test_an_unchanged_width_is_inherited(self) -> None:
-        # An appended step that does not narrow the action needs no declaration.
-        wrapped = self._base().with_adapter(
-            after=[("g1_absolute", UnitreeG1AbsoluteActions(G1_STATE_KEY))]
-        )
-        self.assertEqual(wrapped.action_dim, MODEL_DIM)
-
-    def test_the_model_handle_is_shared_not_reloaded(self) -> None:
-        # Rewiring, not a second load: two handles on one GPU allocation would
-        # double the checkpoint's memory and make close() order matter.
-        base = self._base()
-        self.assertIs(base.with_adapter().model_runner, base.model_runner)
-
-    def test_a_wrapper_cannot_shadow_a_step_it_does_not_own(self) -> None:
-        with self.assertRaises(ValueError) as caught:
-            self._base().with_adapter(
-                before=[("tokenize", UnitreeG1DecodeState(G1_STATE_KEY))]
-            )
-        self.assertIn("tokenize", str(caught.exception))
-
-    def test_pi05_satisfies_the_composable_contract(self) -> None:
-        self.assertIsInstance(self._base(), ComposablePolicy)
-
-
-class _StubComposable:
-    """Minimal ``ComposablePolicy``: records what an adapter wrapped it with."""
-
-    def __init__(self) -> None:
-        self.wrapped: dict = {}
-
-    def with_adapter(self, *, before=(), after=(), action_dim=None, metadata=None):
-        self.wrapped = {
-            "before": [name for name, _ in before],
-            "after": [name for name, _ in after],
-            "action_dim": action_dim,
-            "metadata": dict(metadata or {}),
-        }
-        return self
-
-
 class UnitreeG1AdapterTest(unittest.TestCase):
     """The G1 builder wraps a policy it never names, and hands load flags on.
 
     These run against a stub loader, so they assert the *adapter's* behaviour
-    without a checkpoint: which steps it wraps, on which side, what width it
-    claims, and — the bug this split removes — that every keyword it forwards is
-    one the real loading path accepts.
+    without a checkpoint: what it wraps, what width it claims, and — the bug this
+    split removes — that every keyword it forwards is one the real loading path
+    accepts.
     """
 
     def _patched_loader(self, captured: dict, policy):
@@ -623,15 +569,15 @@ class UnitreeG1AdapterTest(unittest.TestCase):
             captured.update(kwargs, model_dir=model_dir, model_type=model_type)
             return policy
 
-        return mock.patch.object(robot_adapter, "load_policy", load)
+        return mock.patch.object(engine_module, "load_policy", load)
 
     def test_server_load_flags_reach_the_concrete_loader(self) -> None:
-        # --model-type travels server -> build_robot_policy -> this builder. It
+        # --model-type travels server -> build_robot_policy -> the engine loader. It
         # is AutoPolicy's argument, not the concrete policy's, so a builder that
         # forwards it blindly raises TypeError the moment anyone serves a G1
         # checkpoint. Only binding the real signature catches that.
         captured: dict = {}
-        with self._patched_loader(captured, _StubComposable()):
+        with self._patched_loader(captured, _StubPolicy()):
             build_robot_policy(
                 "unitree_g1", "/nowhere", model_type="pi05", precision="bf16"
             )
@@ -639,58 +585,53 @@ class UnitreeG1AdapterTest(unittest.TestCase):
         self.assertEqual(captured["model_variant"], "bf16")
         self.assertEqual(captured["state_key"], G1_STATE_KEY)
         # Loaded at full model width: delta->absolute must see the whole action
-        # before g1_encode truncates it to 16.
+        # before the encode step truncates it to 16.
         self.assertIsNone(captured["action_dim"])
 
-    def test_the_g1_steps_wrap_the_model_chain_from_outside(self) -> None:
-        stub = _StubComposable()
+    def test_the_g1_transform_wraps_the_engine_policy_from_outside(self) -> None:
+        stub = _StubPolicy()
         with self._patched_loader({}, stub):
-            build_robot_policy("unitree_g1", "/nowhere")
-        self.assertEqual(stub.wrapped["before"], ["g1_decode_state"])
-        self.assertEqual(stub.wrapped["after"], ["g1_absolute", "g1_encode"])
-        self.assertEqual(stub.wrapped["action_dim"], G1_ROBOT_DIM)
-        self.assertEqual(stub.wrapped["metadata"]["robot"], "unitree_g1")
+            policy = build_robot_policy("unitree_g1", "/nowhere")
+        self.assertIsInstance(policy, TransformedPolicy)
+        self.assertEqual(policy.action_dim, G1_ROBOT_DIM)
+        self.assertEqual(policy.metadata["robot"], "unitree_g1")
+        policy.close()
+        self.assertEqual(stub.closed, 1)
 
     def test_without_the_truncating_step_no_width_is_claimed(self) -> None:
-        # adapt_to_pi=False drops g1_encode, so nothing narrows the action to 16.
+        # adapt_to_pi=False drops the encode step, so nothing narrows the action to 16.
         # Advertising 16 regardless would publish a width no step produces.
-        stub = _StubComposable()
-        with self._patched_loader({}, stub):
-            build_unitree_g1_policy(
+        with self._patched_loader({}, _StubPolicy()):
+            policy = build_unitree_g1_policy(
                 "/nowhere",
                 state_key=G1_STATE_KEY,
                 image_keys=G1_CAMERAS,
                 adapt_to_pi=False,
             )
-        self.assertEqual(stub.wrapped["before"], [])
-        self.assertEqual(stub.wrapped["after"], ["g1_absolute"])
-        self.assertIsNone(stub.wrapped["action_dim"])
+        self.assertEqual(policy.action_dim, MODEL_DIM)
 
     def test_the_wire_keys_are_required_arguments(self) -> None:
         # Wire keys belong to the recording convention, not the robot body.
-        with self._patched_loader({}, _StubComposable()):
+        with self._patched_loader({}, _StubPolicy()):
             with self.assertRaises(TypeError):
                 build_unitree_g1_policy("/nowhere", image_keys=G1_CAMERAS)
             with self.assertRaises(TypeError):
                 build_unitree_g1_policy("/nowhere", state_key=G1_STATE_KEY)
 
-    def test_a_policy_that_cannot_be_wrapped_is_named_in_the_error(self) -> None:
-        class Unwrappable:
-            pass
-
-        with self._patched_loader({}, Unwrappable()):
-            with self.assertRaises(TypeError) as caught:
+    def test_a_policy_too_narrow_to_wrap_is_closed_and_named_in_the_error(self) -> None:
+        narrow = _StubPolicy(action_dim=8)
+        with self._patched_loader({}, narrow):
+            with self.assertRaises(ValueError) as caught:
                 build_unitree_g1_policy(
                     "/nowhere", state_key=G1_STATE_KEY, image_keys=G1_CAMERAS
                 )
-        message = str(caught.exception)
-        self.assertIn("Unwrappable", message)
-        self.assertIn("with_adapter", message)
+        self.assertIn("at least 16 wide", str(caught.exception))
+        self.assertEqual(narrow.closed, 1)
 
     def test_the_adapter_names_no_model_class(self) -> None:
-        # Robot adapters depend on the composable policy interface.
         source = pathlib.Path(robot_adapter.__file__).read_text()
         self.assertNotIn("Pi05Policy", source)
+        self.assertNotIn("import apxinf", source)
 
 
 class ModelLayerHoldsNoWireKeysTest(unittest.TestCase):
@@ -847,7 +788,7 @@ class UnitreeG1ServingTest(unittest.TestCase):
         self.assertEqual(actions.shape, (HORIZON, G1_ROBOT_DIM))
 
         # Cameras land in declared slot order, resized to the model edge.
-        stacked = self.policy.model_runner.images[0]
+        stacked = self.policy.model.images[0]
         self.assertEqual(stacked.shape, (3, IMAGE_SIZE, IMAGE_SIZE, 3))
         for slot, fill in enumerate((10, 20, 30)):
             self.assertEqual(int(stacked[slot].max()), fill, f"slot {slot}")
@@ -977,14 +918,12 @@ class ConventionsAreTheirOwnLayerTest(unittest.TestCase):
     def test_the_g1_steps_no_longer_hold_the_g1s_wire_keys(self) -> None:
         # The regression to catch: a body's processing steps naming a dataset's
         # keys again. Checked on the module's exports, not by grepping prose.
-        from apxinf_robo.embodiments.unitree_g1 import steps as g1_steps
+        from apxinf_robo.embodiments.unitree_g1 import transform as g1_transform
 
-        self.assertFalse(hasattr(g1_steps, "G1_CAMERAS"))
-        self.assertFalse(hasattr(g1_steps, "G1_STATE_KEY"))
-        for step in (UnitreeG1DecodeState, UnitreeG1AbsoluteActions):
-            with self.subTest(step=step.__name__):
-                default = inspect.signature(step).parameters["state_key"].default
-                self.assertIs(default, inspect.Parameter.empty)
+        self.assertFalse(hasattr(g1_transform, "G1_CAMERAS"))
+        self.assertFalse(hasattr(g1_transform, "G1_STATE_KEY"))
+        default = inspect.signature(G1Transform).parameters["state_key"].default
+        self.assertIs(default, inspect.Parameter.empty)
 
     def test_conventions_import_no_body_and_no_policy_implementation(self) -> None:
         # The layering rule: a dialect may read the model's VIEW_SLOTS vocabulary
@@ -1053,7 +992,7 @@ class RegistrationFromOutsideTest(unittest.TestCase):
         with self.assertRaises(ValueError) as caught:
             register_robot_preset(self._preset(), aliases=("unitree_g1",), replace=True)
         self.assertIn("unitree_g1", str(caught.exception))
-        self.assertIs(get_robot_preset("unitree_g1").embodiment.builder, build_unitree_g1_policy)
+        self.assertIs(get_robot_preset("unitree_g1").embodiment.transform, G1Transform)
 
     def test_moving_an_existing_alias_needs_an_explicit_replace(self) -> None:
         with self.assertRaises(ValueError) as caught:
@@ -1192,9 +1131,9 @@ class NormalizationDtypeTest(unittest.TestCase):
             # kwargs-swallowing mock would never show it.
             inspect.signature(Pi05Policy.from_pretrained).bind(model_dir, **kwargs)
             captured.update(kwargs)
-            return _StubComposable()
+            return _StubPolicy()
 
-        with mock.patch.object(robot_adapter, "load_policy", load):
+        with mock.patch.object(engine_module, "load_policy", load):
             build_robot_policy("unitree_g1", "/nowhere")
 
         self.assertEqual(captured.get("norm_dtype"), "float64")
@@ -1202,7 +1141,9 @@ class NormalizationDtypeTest(unittest.TestCase):
     def test_libero_does_not_ask_for_it(self) -> None:
         # The pin is scoped to the body that needs it. LIBERO's numbers are
         # unchanged by this work, and a global default would have moved them.
-        self.assertNotIn("norm_dtype", get_robot_preset("franka_libero").builder_kwargs)
+        self.assertNotIn(
+            "norm_dtype", get_robot_preset("franka_libero").engine_options.get("apxinf", {})
+        )
 
     # --- link 2: the loader turns the flag into pinned normalizers ------------
 

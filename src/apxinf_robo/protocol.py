@@ -29,6 +29,7 @@ __all__ = [
     "CANONICAL_STATE_KEY",
     "Policy",
     "RobotTransform",
+    "apply_transform",
     "TransformedPolicy",
     "VIEW_SLOTS",
 ]
@@ -82,6 +83,8 @@ class RobotTransform(Protocol):
 
     #: Narrowest engine action width ``after`` accepts.
     min_input_dim: int
+    #: Width of the chunk ``after`` returns, or ``None`` when it leaves the width alone.
+    output_dim: Optional[int]
 
     def before(self, observation: Mapping[str, Any]) -> Mapping[str, Any]: ...
 
@@ -116,7 +119,9 @@ class TransformedPolicy:
             )
         self._inner = inner
         self._transform = transform
-        self._action_dim = int(inner.action_dim if action_dim is None else action_dim)
+        if action_dim is None:
+            action_dim = transform.output_dim if transform.output_dim is not None else inner.action_dim
+        self._action_dim = int(action_dim)
         self.metadata: Dict[str, Any] = {
             **dict(inner.metadata),
             **(dict(metadata) if metadata else {}),
@@ -150,3 +155,23 @@ class TransformedPolicy:
 
     def close(self) -> None:
         self._inner.close()
+
+
+def apply_transform(
+    inner: Policy,
+    transform: RobotTransform,
+    *,
+    action_dim: Optional[int] = None,
+    metadata: Optional[Mapping[str, Any]] = None,
+) -> TransformedPolicy:
+    """Wrap ``inner`` in ``transform``; if that fails, close ``inner`` before raising.
+
+    A loaded engine policy can hold a model (an ApxInf handle, an S600 worker process).
+    Whoever loaded it and then fails to wrap it must release it, and this is that step,
+    so a bad configuration cannot leave a worker occupying the accelerator.
+    """
+    try:
+        return TransformedPolicy(inner, transform, action_dim=action_dim, metadata=metadata)
+    except BaseException:
+        inner.close()
+        raise

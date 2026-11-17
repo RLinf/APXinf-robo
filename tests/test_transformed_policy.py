@@ -12,6 +12,7 @@ class Recorder:
     """A transform that records what it was handed and what order it ran in."""
 
     min_input_dim = 4
+    output_dim = None
 
     def __init__(self, log):
         self.log = log

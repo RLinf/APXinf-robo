@@ -20,3 +20,22 @@ def require(name: str):
     if os.environ.get("APXINF_ROBO_REQUIRE_OPTIONAL"):
         return importlib.import_module(name)
     return pytest.importorskip(name)
+
+
+def installed(distribution: str) -> bool:
+    """Whether a distribution is installed, asked of the metadata and not by importing it.
+
+    ``pytest.importorskip("apxinf")`` is an import attempt, which the forbidden-import run
+    (``APXINF_ROBO_FORBID_IMPORT``) must treat as a failure; this is not one.
+    """
+    from importlib import metadata
+
+    try:
+        metadata.distribution(distribution)
+    except metadata.PackageNotFoundError:
+        return False
+    return True
+
+
+needs_apxinf = pytest.mark.skipif(not installed("apxinf"), reason="needs ApxInf installed")
+needs_drobotics = pytest.mark.skipif(not installed("apx-drobotics"), reason="needs apx-drobotics installed")

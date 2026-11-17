@@ -6,10 +6,13 @@ on:
 
 jobs:
   s600-engine:
-    # 没有 ApxInf 的环境,和板子一样。S600 的端到端测试必须真跑,不能跳过。
+    # No ApxInf, like the board. Any attempt to import it fails the run (AssertionError,
+    # which a try/except ImportError cannot swallow), so this proves the public layer, the
+    # robot presets and the S600 path need no ApxInf and never try to load it.
     runs-on: ubuntu-latest
     env:
       APXINF_ROBO_REQUIRE_OPTIONAL: "1"
+      APXINF_ROBO_FORBID_IMPORT: "apxinf,apxinf_py"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,4 +20,29 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev,drobotics-test]" -e "./apx-drobotics[serve]"
       - run: pytest apx-drobotics/tests -rs
-      - run: pytest tests/test_serve_drobotics.py tests/test_eval_libero_drobotics.py tests/test_protocol.py tests/test_import_without_apxinf.py tests/test_engine_import.py -rs
+      - run: >-
+          pytest -rs
+          tests/test_serve_drobotics.py tests/test_eval_libero_drobotics.py
+          tests/test_protocol.py tests/test_import_without_apxinf.py
+          tests/test_transformed_policy.py tests/test_robot_golden.py
+          tests/test_yam_steps.py tests/test_dual_franka_steps.py
+          tests/test_preset_registry.py
+
+  apxinf-engine:
+    # ApxInf's pure-Python front end, without apx_drobotics. The robot transforms are held
+    # to their golden outputs here, and the tests that drive a real Pi05Policy run (over a
+    # mock model: the native ``apxinf_py`` extension is not needed). Any attempt to import
+    # apx_drobotics fails the run, so the ApxInf path cannot depend on the S600 package.
+    runs-on: ubuntu-latest
+    env:
+      APXINF_ROBO_REQUIRE_OPTIONAL: "1"
+      APXINF_ROBO_FORBID_IMPORT: "apx_drobotics"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]" -e ./apxinf/python/apxinf pillow msgpack websockets openpi-client typing-extensions
+      - run: pytest -rs tests --ignore=tests/test_serve_drobotics.py --ignore=tests/test_eval_libero_drobotics.py

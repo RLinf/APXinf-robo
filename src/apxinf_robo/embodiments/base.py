@@ -17,8 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, Mapping, Optional, Tuple
 
 from ..conventions.base import Convention
-from ..engine import load_policy
-from ..protocol import VIEW_SLOTS
+from ..protocol import VIEW_SLOTS, RobotTransform
 
 __all__ = [
     "VIEW_SLOTS",
@@ -32,14 +31,9 @@ __all__ = [
 ]
 
 
-def _build_generic(model_dir, **kwargs):
-    """Default builder: the stock policy, no robot-specific pre/post steps."""
-    return load_policy(model_dir, **kwargs)
-
-
 @dataclass(frozen=True)
 class Embodiment:
-    """Robot camera/action geometry and its optional processing builder."""
+    """Robot camera/action geometry and its optional pre/post transform."""
 
     #: Robot name, used in the served metadata and in preset names.
     name: str
@@ -61,10 +55,14 @@ class Embodiment:
     #: still 16 wide and its statistics must be. ``None`` permits padding and
     #: checks coverage of ``action_dim`` when that effective width is declared.
     action_width: Optional[int] = None
-    #: Factory that loads the checkpoint and wires this robot's pre/post steps.
-    builder: Callable[..., Any] = _build_generic
-    #: Extra keyword arguments the builder always receives.
-    builder_kwargs: Mapping[str, Any] = field(default_factory=dict)
+    #: Factory for this body's pre/post arithmetic: called with the state key, returns a
+    #: :class:`~apxinf_robo.protocol.RobotTransform`. ``None`` means the model's own
+    #: output is what the robot takes. A body names no engine: the transform wraps
+    #: whatever policy an engine produced.
+    transform: Optional[Callable[..., RobotTransform]] = None
+    #: Loader options a particular engine needs for this body, keyed by engine name
+    #: (``{"apxinf": {"norm_dtype": "float64"}}``). An engine ignores other engines' keys.
+    engine_options: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not 1 <= self.num_cameras <= len(VIEW_SLOTS):
@@ -88,9 +86,9 @@ class Embodiment:
             )
 
     @property
-    def has_robot_steps(self) -> bool:
+    def has_transform(self) -> bool:
         """Whether this body adds robot-specific pre/post processing."""
-        return self.builder is not _build_generic
+        return self.transform is not None
 
 
 @dataclass(frozen=True)
@@ -153,12 +151,12 @@ class RobotPreset:
         return self.embodiment.action_width
 
     @property
-    def builder(self) -> Callable[..., Any]:
-        return self.embodiment.builder
+    def transform(self) -> Optional[Callable[..., RobotTransform]]:
+        return self.embodiment.transform
 
     @property
-    def builder_kwargs(self) -> Mapping[str, Any]:
-        return self.embodiment.builder_kwargs
+    def engine_options(self) -> Mapping[str, Mapping[str, Any]]:
+        return self.embodiment.engine_options
 
     @property
     def num_views(self) -> int:
@@ -166,9 +164,9 @@ class RobotPreset:
         return self.embodiment.num_cameras
 
     @property
-    def has_robot_steps(self) -> bool:
-        """Whether this preset wires robot-specific pre/post steps."""
-        return self.embodiment.has_robot_steps
+    def has_transform(self) -> bool:
+        """Whether this preset wraps the engine's policy in robot pre/post arithmetic."""
+        return self.embodiment.has_transform
 
     def synthetic_gaps(
         self, *, discrete_state: bool, served_action_dim: int
@@ -180,9 +178,9 @@ class RobotPreset:
                 "discrete_state=True — the synthetic tokenizer ignores state, so the "
                 "served metadata says discrete_state=False"
             )
-        if self.has_robot_steps:
+        if self.has_transform:
             gap = (
-                f"its robot pre/post steps — {self.builder.__name__} never runs, so no "
+                "its robot pre/post transform — it is never applied, so no "
                 "state decode, delta->absolute or action re-encode is wired"
             )
             if self.action_dim is None:

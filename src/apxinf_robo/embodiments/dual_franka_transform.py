@@ -73,6 +73,7 @@ class DualFrankaTransform:
     """Dual-Franka's state reorder on the way in, body-frame composition on the way out."""
 
     min_input_dim = DUAL_FRANKA_ACTION_DIM
+    output_dim = DUAL_FRANKA_ACTION_DIM
 
     def __init__(self, state_key: str) -> None:
         self.state_key = state_key

@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from apxinf_robo.embodiments.yam import YamAbsoluteActions
+from apxinf_robo.embodiments.yam_transform import YamTransform
 
 
 def test_yam_restores_each_arm_relative_to_observation_without_accumulating():
@@ -12,8 +12,7 @@ def test_yam_restores_each_arm_relative_to_observation_without_accumulating():
     raw[:, 6] = 0.2
     raw[:, 13] = 0.8
     original = raw.copy()
-    data = {"observation": {"state": state}, "actions": raw}
-    result = YamAbsoluteActions("state")(data)["actions"]
+    result = YamTransform("state").after(raw, {"state": state})
     assert result.shape == (30, 14)
     np.testing.assert_allclose(result[:, :6], np.tile(state[:6] + 0.25, (30, 1)))
     np.testing.assert_allclose(result[:, 7:13], np.tile(state[7:13] + 0.25, (30, 1)))
@@ -27,9 +26,7 @@ def test_yam_restores_each_arm_relative_to_observation_without_accumulating():
 )
 def test_yam_rejects_invalid_state(state):
     with pytest.raises(ValueError, match="14-value"):
-        YamAbsoluteActions("state")(
-            {"observation": {"state": state}, "actions": np.zeros((30, 32))}
-        )
+        YamTransform("state").after(np.zeros((30, 32)), {"state": state})
 
 
 @pytest.mark.parametrize(
@@ -37,21 +34,16 @@ def test_yam_rejects_invalid_state(state):
 )
 def test_yam_rejects_invalid_actions(actions):
     with pytest.raises(ValueError, match="action chunk"):
-        YamAbsoluteActions("state")(
-            {"observation": {"state": np.zeros(14)}, "actions": actions}
-        )
+        YamTransform("state").after(actions, {"state": np.zeros(14)})
 
 
 def test_yam_missing_state_never_sends_unresolved_deltas():
     with pytest.raises(KeyError):
-        YamAbsoluteActions("state")({"observation": {}, "actions": np.zeros((30, 32))})
+        YamTransform("state").after(np.zeros((30, 32)), {})
 
 
 def test_yam_nested_observation_keys():
-    result = YamAbsoluteActions("robot/state")(
-        {
-            "observation": {"robot": {"state": np.ones(14)}},
-            "actions": np.zeros((2, 14)),
-        }
-    )["actions"]
+    result = YamTransform("robot/state").after(
+        np.zeros((2, 14)), {"robot": {"state": np.ones(14)}}
+    )
     np.testing.assert_array_equal(result[0], [1] * 6 + [0] + [1] * 6 + [0])

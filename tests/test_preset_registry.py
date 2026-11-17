@@ -13,15 +13,15 @@ class _CapturedPolicy:
 
 
 def _stub_loader(monkeypatch, captured: dict):
-    """Replace the engine loader that every generic preset builder calls."""
-    from apxinf_robo.embodiments import base
+    """Replace the engine loader that ``build_robot_policy`` calls."""
+    from apxinf_robo import presets
 
-    def fake_load(model_dir, **kwargs):
+    def fake_load(engine, model_dir, **kwargs):
         captured["model_dir"] = model_dir
         captured.update(kwargs)
         return _CapturedPolicy()
 
-    monkeypatch.setattr(base, "load_policy", fake_load)
+    monkeypatch.setattr(presets, "load_engine_policy", fake_load)
 
 
 def test_franka_libero_leaves_checkpoint_state_semantics_unchanged(monkeypatch):

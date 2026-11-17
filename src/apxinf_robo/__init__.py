@@ -27,8 +27,9 @@ Everything reaches an engine through one module: :mod:`apxinf_robo.engine` for
 ApxInf, and :mod:`apxinf_robo.engine_drobotics` for the D-Robotics S600 (``apx_drobotics``).
 Both give a policy of the :class:`~apxinf_robo.protocol.Policy` shape, so the layers
 above do not depend on either, and this package imports without ApxInf, as it must on
-the S600 board. There, only what ApxInf provides is missing: the bodies that need its
-processor chain, and checkpoint preflight. Touching those raises its install hint.
+the S600 board, and without ``apx_drobotics``. Every body and preset is available
+everywhere; only checkpoint preflight and ``load_bare_model`` need ApxInf, and touching
+them there raises its install hint.
 
     >>> from apxinf_robo import build_robot_policy, check_checkpoint, format_findings
     >>> print(format_findings(check_checkpoint("/ckpt/pi05_g1", "unitree_g1")))  # doctest: +SKIP
@@ -53,52 +54,55 @@ from .embodiments import (
     RobotPreset,
     available_robots,
     get_robot_preset,
+    build_unitree_g1_policy,
     register_robot_preset,
 )
-from .engine import ApxInfEngine, apxinf_available, require_apxinf
-from .presets import ENGINES, FRANKA_LIBERO, build_robot_policy
-from .protocol import Policy
+from .engine import ApxInfEngine, apxinf_available
+from .engines import ENGINES, load_engine_policy
+from .engines import websocket_server as _websocket_server
+from .presets import DUAL_FRANKA, FRANKA_LIBERO, UNITREE_G1, YAM, build_robot_policy
+from .protocol import Policy, RobotTransform, TransformedPolicy, apply_transform
 
-#: Exports that exist only where ApxInf does. ``load_policy``, ``load_bare_model`` and
-#: ``websocket_server`` are ApxInf's implementations, not an engine-neutral facade, so
-#: they are not offered where ApxInf is absent; use ``build_robot_policy`` (which takes
-#: ``engine=``) or ``apxinf_robo.engine_drobotics`` there.
-_APXINF_NAMES = (
-    "load_policy",
-    "load_bare_model",
-    "websocket_server",
-    "UNITREE_G1",
-    "DUAL_FRANKA",
-    "YAM",
-    "build_unitree_g1_policy",
-    "FAIL",
-    "WARN",
-    "INFO",
-    "Finding",
-    "check_checkpoint",
-    "inspect_for_robot",
-    "format_findings",
-)
 
-if apxinf_available():
-    from .embodiments import build_unitree_g1_policy
-    from .engine import load_bare_model, load_policy, websocket_server
-    from .preflight import (
-        FAIL,
-        INFO,
-        WARN,
-        Finding,
-        check_checkpoint,
-        format_findings,
-        inspect_for_robot,
-    )
-    from .presets import DUAL_FRANKA, UNITREE_G1, YAM
-else:
+def load_policy(model_dir, *, engine: str = "apxinf", **kwargs):
+    """Load ``model_dir`` on ``engine`` (``"apxinf"`` or ``"drobotics"``).
 
-    def __getattr__(name: str):
-        if name in _APXINF_NAMES:
-            require_apxinf()
+    ``kwargs`` reach that engine's loader. The engine is imported only now, so a missing
+    one raises its own install hint here and nothing else is affected.
+    """
+    return load_engine_policy(engine, model_dir, **kwargs)
+
+
+def websocket_server(policy, host: str, port: int, *, engine: str = "apxinf"):
+    """The OpenPI websocket server around ``policy``, for the ``engine`` that produced it."""
+    return _websocket_server(policy, host, port, engine=engine)
+
+
+#: ApxInf-backed names, resolved on first access. They are always *present*: what this
+#: package offers does not depend on what is installed, and touching one without ApxInf
+#: raises the install hint. They stay out of ``__all__`` so ``import *`` never forces them.
+_LAZY = {
+    "load_bare_model": (".engine", "load_bare_model"),
+    "FAIL": (".preflight", "FAIL"),
+    "WARN": (".preflight", "WARN"),
+    "INFO": (".preflight", "INFO"),
+    "Finding": (".preflight", "Finding"),
+    "check_checkpoint": (".preflight", "check_checkpoint"),
+    "inspect_for_robot": (".preflight", "inspect_for_robot"),
+    "format_findings": (".preflight", "format_findings"),
+}
+
+
+def __getattr__(name: str):
+    target = _LAZY.get(name)
+    if target is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    import importlib
+
+    from .engine import require_apxinf
+
+    require_apxinf()
+    return getattr(importlib.import_module(target[0], __name__), target[1])
 
 
 __version__ = "0.1.0"
@@ -128,9 +132,16 @@ __all__ = [
     # engine access
     "ENGINES",
     "Policy",
+    "RobotTransform",
+    "TransformedPolicy",
+    "apply_transform",
     "ApxInfEngine",
     "apxinf_available",
-    # needs ApxInf
-    *(_APXINF_NAMES if apxinf_available() else ()),
+    "load_policy",
+    "websocket_server",
+    "UNITREE_G1",
+    "DUAL_FRANKA",
+    "YAM",
+    "build_unitree_g1_policy",
     "__version__",
 ]

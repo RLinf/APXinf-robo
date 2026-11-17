@@ -43,6 +43,7 @@ class YamTransform:
     """YAM's output side: delta joints to absolute qpos14. The observation passes unchanged."""
 
     min_input_dim = YAM_DIM
+    output_dim = YAM_DIM
 
     def __init__(self, state_key: str) -> None:
         self.state_key = state_key
