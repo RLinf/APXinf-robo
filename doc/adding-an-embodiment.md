@@ -202,6 +202,15 @@ against the same state the model saw. Actions arriving in `after` are in the
 engine's deployable domain: unnormalized `[horizon, width]`, not clipped or
 re-encoded for any body, so the transform must not repeat normalization.
 
+Both engines meet that description. On ApxInf, `after` runs behind the model's own
+`unnormalize` step (the dtype follows the loader: float64 when `norm_dtype` is pinned,
+as for G1). On the S600, the SDK unnormalizes inside the runtime and `apx_drobotics`
+applies nothing further: its postprocess only checks shape and finiteness and casts to
+the contract's `output_dtype` (float32); the contract records `"postprocess": "none: no
+delta integration, no filter, no clipping in the runtime"`. That statement is the
+contract's, taken from the vendor's runtime, and has been exercised on the board only
+through the LIBERO deployment, where the actions go to the controller unchanged.
+
 Resolve every wire key through `lookup_key` / `set_key` from
 `apxinf_robo.wirekeys`. They resolve **flat first, then as a nested path**, so one
 key string addresses either layout: `"observation/image"` hits
