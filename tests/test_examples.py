@@ -180,9 +180,9 @@ class RegisterPresetExampleTest(_IsolatedRegistries):
         self.assertEqual(preset.state_key, "robot/joint_positions")
         self.assertEqual(preset.num_views, 2)
         self.assertEqual(preset.action_dim, 7)
-        # No builder was supplied, so the generic one applies: the preset's keys
-        # are served without any robot-specific arithmetic.
-        self.assertFalse(preset.has_robot_steps)
+        # No transform was supplied: the preset's keys are served without any
+        # robot-specific arithmetic.
+        self.assertFalse(preset.has_transform)
 
     def test_main_runs_without_a_checkpoint(self) -> None:
         # The example's whole point is that it needs no weights and no GPU.

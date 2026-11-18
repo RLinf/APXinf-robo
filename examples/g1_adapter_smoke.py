@@ -10,7 +10,7 @@ A G1-style observation (3 cameras ``cam_high`` / ``cam_left_wrist`` /
 ``cam_right_wrist``, 16-DoF state, a prompt) is fed to a
 :func:`~apxinf_robo.embodiments.unitree_g1.build_unitree_g1_policy` policy and
 must come back as a ``[action_horizon, 16]`` action chunk -- exercising every
-adapter step (decode-state -> tokenize -> model -> unnormalize -> delta->absolute
+stage (decode state -> the engine's tokenize/model/unnormalize -> delta->absolute
 -> 32->16 encode).
 
 Unlike the other examples this one asserts rather than only printing, because
@@ -93,8 +93,7 @@ def main() -> None:
         metadata={"config": "pi05_UnitreeG1_groundwire", "note": "stand-in ckpt, shape-only"},
     )
 
-    print("input pipeline :", policy.input_pipeline.names)
-    print("output pipeline:", policy.output_pipeline.names)
+    print("wrapped policy :", type(policy).__name__, "around", type(policy._inner).__name__)
     print(
         "metadata       :",
         {

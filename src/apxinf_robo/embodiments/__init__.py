@@ -3,6 +3,9 @@
 A body is what changes when you swap hardware. It is deliberately separate from
 a :mod:`~apxinf_robo.conventions` dialect (what changes when you swap the
 recorder) and from the engine (what changes when you swap the checkpoint).
+
+Every body is available everywhere: a body that processes observations or actions does
+so with an engine-neutral transform that wraps whichever policy an engine produced.
 """
 
 from __future__ import annotations
@@ -34,8 +37,8 @@ __all__ = [
     "FRANKA",
     "DUAL_FRANKA_BODY",
     "YAM_BODY",
+    "UNITREE_G1_BODY",
     "build_dual_franka_policy",
     "build_yam_policy",
-    "UNITREE_G1_BODY",
     "build_unitree_g1_policy",
 ]

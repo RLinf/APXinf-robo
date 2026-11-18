@@ -53,7 +53,7 @@ contracts.
 ## Launching a server for an existing embodiment
 
 `--robot` is the only flag that has to be right. It selects the wire keys, the
-state routing, the action width, and the robot pre/post steps together.
+state routing, the action width, and the robot pre/post transform together.
 
 ```bash
 # Franka Panda under LIBERO's key convention (the default)
@@ -102,7 +102,7 @@ Published keys: `robot`, `robot_steps`, `robot_slots`, `state_dim`, `model_type`
 `action_horizon`, `action_dim`, `model_action_dim`, `num_views`, `image_size`,
 `input_pipeline`, `output_pipeline`. A key mismatch is invisible on the wire but
 obvious here. `robot_steps` is `False` on a server that serves a preset's keys
-without running its builder — see `--random-weights` below.
+without applying its transform — see `--random-weights` below.
 
 ### Per-field overrides
 
@@ -166,106 +166,102 @@ Facts 1–5 are just a table row. Facts 6–7 are the only ones that need code.
 straight out of a checkpoint's own `metadata.pt` and diffs them against a preset,
 which is faster than reading the training config by hand and cannot misremember.
 
-### Step 1 — decide whether you need robot steps at all
+### Step 1 — decide whether you need a robot transform at all
 
 | the checkpoint… | what to write |
 |---|---|
 | emits absolute actions in robot space, at the deployable width | **nothing** — a preset row is the whole port |
 | needs a fixed truncation only | a preset row with `action_dim=N` |
-| emits deltas, or needs a sign/gripper convention | processing steps + a builder (Steps 2–3) |
+| emits deltas, or needs a sign/gripper convention | a robot transform (Steps 2–3) |
 
 `franka_libero` requires only a preset row.
 
-### Step 2 — robot processing steps
+### Step 2 — the robot transform
 
-`src/apxinf_robo/embodiments/<robot>/steps.py`. Each step is an
-`apxinf.processors.ProcessorStep`: `dict -> dict` over the shared data dict, with
-a name. These must be **model-agnostic** — they reference no policy symbols and
-vary only with the robot body. Importing `ProcessorStep` is fine: it is shared
-type information, not an engine instance.
-
-The data-dict contract:
-
-* input chain reads `observation` / `prompt`, writes `rgb` (uint8 NHWC),
-  `token_ids` (uint32), `noise`;
-* output chain reads `normalized_actions`, writes `trimmed` then `actions`
-  (unnormalized float32). `observation` is threaded through so an output step can
-  read state.
-
-Resolve every wire key through `lookup_key` / `has_key` / `set_key` from
-`apxinf.processors.transforms` rather than indexing the observation directly.
-They resolve **flat first, then as a nested path**, so one flat key string
-addresses either layout: `"observation/image"` hits `data["observation/image"]`
-if that key literally exists, and `"images/cam_high"` walks
-`data["images"]["cam_high"]` when it does not. `set_key` returns a copy — the
-client's dict is never mutated.
-
-Write each step as a no-op when its input is absent. `UnitreeG1DecodeState`
-returns `data` unchanged when there is no state, so state-off serving degrades to
-"this step does nothing" instead of raising deep in the pipeline.
-
-### Step 3 — the builder
-
-`src/apxinf_robo/embodiments/<robot>/builder.py`. One factory that loads the
-checkpoint through `apxinf_robo.engine.load_policy` — so `config.json` decides
-which model it is, not this file — and then wraps the robot steps *around*
-whatever chain that policy has:
+`src/apxinf_robo/embodiments/<robot>/transform.py`. A transform is plain numpy and
+knows **no engine**: it imports neither ApxInf nor `apx_drobotics`. It has the shape
+of `apxinf_robo.protocol.RobotTransform`:
 
 ```python
-from apxinf.policies.base import ComposablePolicy
+class MyRobotTransform:
+    min_input_dim = 16          # narrowest engine action width `after` can work on
+    output_dim = 16             # width `after` returns; None if it leaves the width alone
 
-from ...engine import load_policy
+    def __init__(self, state_key: str): ...
 
-# state_key and image_keys come from the selected convention.
-def build_<robot>_policy(model_dir, *, state_key, image_keys, **load_kwargs):
-    base = load_policy(
-        model_dir,
-        image_keys=tuple(image_keys),
-        action_dim=None,      # keep full model width; the encode step truncates
-        state_key=state_key,
-        **load_kwargs,
-    )
-    if not isinstance(base, ComposablePolicy):
-        raise TypeError(f"{type(base).__name__} has no with_adapter(); ...")
-    return base.with_adapter(
-        before=[("<robot>_decode_state", <Robot>DecodeState(state_key))],
-        after=[("<robot>_absolute", <Robot>AbsoluteActions(state_key)),
-               ("<robot>_encode",   <Robot>EncodeActions())],
-        action_dim=ROBOT_DIM,             # the width the encode step leaves behind
-        metadata={"robot": "<robot>"},
-    )
+    def before(self, observation):          # new mapping; never mutate the argument
+        ...
+    def after(self, actions, observation):  # `observation` is what `before` returned
+        ...
 ```
 
-`load_policy` is imported from `engine.py` rather than reaching for
-`apxinf.AutoPolicy` directly. That is the rule for this package: **one module
-loads and runs the engine**, so a submodule bump is one diff to read and a
-compatibility shim has one place to live. `tests/test_robot_presets.py`
-monkeypatches that name, which is only possible because it is a module-level
-import here rather than an attribute lookup on `apxinf`.
+The order is the contract: `before` -> the engine's whole pipeline -> `after`.
+`before` sees the client's raw observation, so a state decode there is what the
+model's tokenizer reads. `after` is handed `before`'s output, so a delta resolves
+against the same state the model saw. Actions arriving in `after` are in the
+engine's deployable domain: unnormalized `[horizon, width]`, not clipped or
+re-encoded for any body, so the transform must not repeat normalization.
 
-The builder depends on the `ComposablePolicy` interface, not on a concrete model
-class or the names of model-specific processing steps. `with_adapter` prepends
-robot input steps and appends robot output steps around the model pipeline —
-strict onion nesting, not a bisection of the model's own chain.
+Both engines meet that description. On ApxInf, `after` runs behind the model's own
+`unnormalize` step (the dtype follows the loader: float64 when `norm_dtype` is pinned,
+as for G1). On the S600, the SDK unnormalizes inside the runtime and `apx_drobotics`
+applies nothing further: its postprocess only checks shape and finiteness and casts to
+the contract's `output_dtype` (float32); the contract records `"postprocess": "none: no
+delta integration, no filter, no clipping in the runtime"`. That statement is the
+contract's, taken from the vendor's runtime, and has been exercised on the board only
+through the LIBERO deployment, where the actions go to the controller unchanged.
 
-The builder preserves these orderings:
+Resolve every wire key through `lookup_key` / `set_key` from
+`apxinf_robo.wirekeys`. They resolve **flat first, then as a nested path**, so one
+key string addresses either layout: `"observation/image"` hits
+`data["observation/image"]` if that key literally exists, and `"images/cam_high"`
+walks `data["images"]["cam_high"]` when it does not. `set_key` returns a copy.
 
-* the decode-state step goes **before** the model's whole input chain, so
-  discretized state (when on) and the delta→absolute output step both see the
-  decoded state;
-* the model pipeline resolves the checkpoint's deployable action width before
-  robot output steps run. Pass `action_dim=None` when the appended encode step
-  owns the final width.
+Keep the arithmetic in module-level functions and make the class a thin
+composition of them (`unitree_g1/transform.py` does), so each piece can be tested
+against fixed inputs without a policy. Keep dtypes as they come: the G1 path is
+deliberately float64 end to end to match OpenPI, and a coercion to float32 is a
+~2e-7 divergence that only shows up as a token flipping a bin.
 
-Declare `action_dim=` only for the width a step you appended actually produces.
-Without the truncating step there is nothing to claim — inherit the model's own
-width instead of advertising one nothing emits.
+Write each side as a no-op when its input is absent where the body allows it
+(`G1Transform.before` returns the observation unchanged when there is no state, so
+state-off serving degrades to "this does nothing"); raise where silence would send
+a wrong action (YAM and dual-Franka refuse a missing or malformed state rather than
+ship unresolved deltas).
+
+### Step 3 — nothing to assemble
+
+There is no builder to write. `build_robot_policy` loads the checkpoint on the
+selected engine and wraps your transform around the result:
+
+```python
+engine_policy = load_engine_policy(engine, model_dir, ...)   # apxinf or drobotics
+policy = apply_transform(engine_policy, preset.transform(state_key), metadata=...)
+```
+
+`TransformedPolicy` runs `before -> engine.infer -> after`, passes every other result
+key through (`normalized_actions`, `token_ids`, ...), adds its own time to
+`timing["total_ms"]` as `robot_ms`, and forwards `noise=` only when the caller gave
+one. It checks the engine's action width against `min_input_dim` at construction and
+closes the engine policy if that (or anything else) fails, so a bad pairing cannot
+leave a model or an S600 worker occupying the accelerator.
+
+Because the transform names no engine, the same one runs on ApxInf and on the S600,
+and what decides whether a pairing is servable is the engine's own deployment
+contract: camera count, state width and action width are checked there, with the
+disagreement named. A G1 preset against the LIBERO S600 deployment is refused
+because that checkpoint has two cameras and 8 state values, not because robot
+transforms are unsupported.
+
+`build_<robot>_policy(...)` functions (for example `build_unitree_g1_policy`) remain
+as compatibility entry points that load on ApxInf and wrap the transform in one
+call. They import ApxInf only when called.
 
 ### Step 4 — register the convention and the preset
 
 A preset pairs an `Embodiment` with a `Convention` and declares whether the
 checkpoint discretizes state into the prompt. The embodiment defines the robot's
-camera count, action widths, and processing builder. The convention defines
+camera count, action widths, and its transform. The convention defines
 dataset wire keys. They are separate because they vary independently: LIBERO and
 DROID are the same arm with different dialects. State encoding belongs to the
 preset because it follows the checkpoint's training config, not the wire keys.
@@ -289,8 +285,8 @@ MY_ARM = Embodiment(
     action_dim=7,               # None keeps full width when an encode step truncates
     state_dim=8,                # how wide norm_stats["state"] has to be
     action_width=7,             # how wide norm_stats["actions"] has to be
-    builder=build_my_robot_policy,   # omit for the stock policy
-    builder_kwargs={},          # constants the builder always receives
+    transform=MyRobotTransform,      # omit when the engine's output is what the robot takes
+    engine_options={},          # loader options one engine needs, keyed by engine name
 )
 
 # src/apxinf_robo/presets.py — the pairing
@@ -330,9 +326,10 @@ metadata. `action_dim` controls model-output trimming during loading;
 `action_width` records the robot action width. If a robot output step performs
 the truncation, set `action_dim=None` and declare the result in `action_width`.
 
-Set `norm_dtype="float64"` in `builder_kwargs` when matching an OpenPI
+Set `engine_options={"apxinf": {"norm_dtype": "float64"}}` when matching an OpenPI
 checkpoint's normalization and state-discretization numerics. Otherwise the
-normalizers follow the input dtype.
+normalizers follow the input dtype. The options are keyed by engine because they are
+that engine's loader arguments; another engine ignores them.
 
 Pass `aliases=(...)` to `register_robot_preset` for supported alternate launch
 names.
@@ -362,7 +359,7 @@ run on CPU with a mock model — no GPU, no checkpoint:
 4. **slot order is load-bearing** — reordering `image_keys` reorders the stacked
    views (`ImageSlotOrderTest` asserts this against the tensor, not the metadata);
 5. **the contract you publish is the one you serve** — `BuildRobotPolicyTest`
-   asserts the resolved keys and `robot_steps` reach the builder and the metadata,
+   asserts the resolved keys and `robot_steps` reach the engine loader and the metadata,
    and `SyntheticContractTest` asserts a checkpoint-free server names what it
    cannot honour instead of passing for the real embodiment.
 
@@ -428,10 +425,10 @@ than the server.
 For a transport-only check with no weights on disk, `apxinf-robo serve
 --random-weights --robot <preset>` serves the preset's key layout and view count
 on synthetic weights. That is all it serves: the actions are numerically
-meaningless, and the preset's `builder` never runs, so none of its robot pre/post
-steps is wired. It publishes `robot_steps=false` and warns once at startup naming
+meaningless, and the preset's transform is never applied, so none of its robot
+pre/post arithmetic is wired. It publishes `robot_steps=false` and warns once at startup naming
 every gap — `discrete_state` (the synthetic tokenizer never reads state) and, for
-a robot-step preset, the skipped factory and the action width that came out of
+a transform preset, the skipped transform and the action width that came out of
 the model instead of out of the encode step.
 
 ### If you are serving FP8
@@ -477,7 +474,7 @@ array names, prompt as a 0-d unicode array — or export a JSONL manifest instea
    and names the fix in the message.
 7. **`--random-weights` previews the wire layer only.** Its synthetic tokenizer
    ignores state, so the published metadata says `discrete_state=False`, and it
-   never runs `preset.builder`, so no robot pre/post step is wired and the action
+   never applies the preset's transform, so no robot pre/post step is wired and the action
    width is the model's rather than the encode step's. Truthful about that server,
    misleading as a preview — hence `robot_steps=false` in the metadata and a
    startup warning per gap. Use a checkpoint for a real contract check.
@@ -490,18 +487,23 @@ array names, prompt as a 0-d unicode array — or export a JSONL manifest instea
 1. **The embodiment is explicit, never inferred.** No preset is guessed from the
    checkpoint, and `--num-views` is not inferred from `len(image_keys)`. An
    omission should fail at startup.
-2. **Robot steps are model-agnostic; builders are where they meet a policy.**
-   `embodiments/<robot>/steps.py` imports no policy symbols;
-   `embodiments/<robot>/builder.py` does the assembly. Neither holds a wire key:
-   those are a dataset's, and live in `conventions/`.
-3. **Only `engine.py` loads or runs the engine.** Everything else may import
-   ApxInf for *vocabulary* — `Policy`, `ProcessorStep`, `Finding`, `VIEW_SLOTS`,
-   `Unnormalizer` — because shared type information belongs where it is used.
-   Nothing else constructs a model, allocates a device, or serves one.
+2. **A robot transform names no engine.** `embodiments/<robot>/transform.py`
+   imports neither ApxInf nor `apx_drobotics`, and `Embodiment` holds a transform
+   factory, not a loader. `build_robot_policy` is where a transform meets an engine's
+   policy. Neither holds a wire key: those are a dataset's, and live in
+   `conventions/`.
+3. **Only `engines.py` chooses an engine, and nothing probes for one.** `engines.py`
+   imports `engine.py` (ApxInf) or `engine_drobotics.py` (the S600, `apx_drobotics`)
+   when that engine is selected, and not before; see [Engines](../README.md#engines).
+   What the package offers does not depend on what is installed, so a missing engine
+   fails with its install hint when used. `protocol.py` owns the shared vocabulary
+   (`Policy`, `RobotTransform`, `VIEW_SLOTS`), so the package imports without either
+   engine. Nothing outside an engine module constructs a model, allocates a device,
+   or serves one.
 4. **Fail loudly with the served contract in the message.** Every error in this
    layer names what the server is actually serving, because the person reading it
    is comparing two dialects.
-5. **A preset row is the cheapest port; prefer it.** Only write steps for a
+5. **A preset row is the cheapest port; prefer it.** Only write a transform for a
    convention the model output genuinely does not satisfy.
 6. **Overrides exist for deployed clients, not for new robots.** If the same
    `--image-keys` shows up twice, add a preset.
@@ -514,11 +516,14 @@ including the ones `franka_libero` skips:
 - `src/apxinf_robo/presets.py` — the registry and both presets
 - `src/apxinf_robo/embodiments/base.py` — `Embodiment` / `RobotPreset` machinery
 - `src/apxinf_robo/conventions/` — the LIBERO, G1, and canonical wire keys
-- `src/apxinf_robo/embodiments/unitree_g1/steps.py` — decode-state,
-  delta→absolute, 32→16 encode
-- `src/apxinf_robo/embodiments/unitree_g1/builder.py` — the builder that splices
-  them in
-- `apxinf.processors.transforms` (engine side) — `lookup_key`/`has_key`/`set_key`
+- `src/apxinf_robo/embodiments/unitree_g1/transform.py` — decode-state,
+  delta→absolute, 32→16 encode, and `G1Transform` composing them
+- `src/apxinf_robo/protocol.py` — `RobotTransform`, `TransformedPolicy`
+- `src/apxinf_robo/engines.py` — where an engine is selected
+- `src/apxinf_robo/wirekeys.py` — `lookup_key` / `set_key`
+- `tests/test_robot_golden.py`, `tests/fixtures/robot_golden.npz` — the transform held
+  to the outputs of the chain it replaced
+- `tests/test_engine_contract.py` — what every engine's policy, bare and wrapped, must do
 - `tests/test_robot_presets.py` — contract, serving, and slot-order tests
 - `examples/g1_adapter_smoke.py --model-dir "$G1_CKPT"` — the one end-to-end
   check that needs a GPU; copy it for your own body

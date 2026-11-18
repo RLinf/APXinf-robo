@@ -36,6 +36,7 @@ or a loaded weight -- it is a seconds-long, laptop-runnable check.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import pathlib
 
@@ -180,7 +181,9 @@ def compare_to_preset(config: dict, robot: str) -> list:
         value = data.get(field)
         if value is None:
             continue
-        wanted = preset.builder_kwargs.get(field)
+        # What the preset's transform does unless told otherwise (its constructor default).
+        parameter = inspect.signature(preset.transform).parameters.get(field) if preset.transform else None
+        wanted = None if parameter is None or parameter.default is inspect.Parameter.empty else parameter.default
         if wanted is None:
             out.append(Finding(INFO, label, f"metadata.pt={value}; preset does not set it"))
         elif bool(value) == bool(wanted):

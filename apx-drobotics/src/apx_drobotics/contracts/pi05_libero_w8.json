@@ -1,0 +1,244 @@
+{
+  "contract_id": "drobotics-pi05-libero-w8",
+  "contract_version": 2,
+  "sdk": {
+    "version": "2.0.0",
+    "runtime_type": "Pi0Sdk",
+    "archive_sha256": "c6e41728e5dc482530225bb28093e9958b255595b88eba9bf181bbc8892fe70b",
+    "files": {
+      "examples/vla_demo/pi0/dist/libvla_pi0_sdk.so": {
+        "bytes": 236704,
+        "sha256": "79833edc78413820516d005416bdcd4fc3da1349818b9e0fe62c080e94a92de2"
+      },
+      "lib/liboellm_runtime.so": {
+        "bytes": 16958360,
+        "sha256": "4eba90802e0fa51c0cb6e2fe56f9966ad29ee5b0a94d4abae0a206226758ebf0"
+      },
+      "lib/libvla_sdk.so": {
+        "bytes": 490816,
+        "sha256": "fe7770f29f0f49c964097f86b9d29fe256a4894ed021deb6a4b48a76afefb37c"
+      },
+      "lib/libdnn.so": {
+        "bytes": 1709632,
+        "sha256": "0851c40eb251722f550c77d4645c28e203faa11abd05032c0e2b8d74aab0dd2c"
+      },
+      "lib/libhbrt4.so": {
+        "bytes": 3224496,
+        "sha256": "9dbf360587559b3bf1463a742209580f010a857e36d90c0d950b08aed64ad8dd"
+      },
+      "lib/libhbucp.so": {
+        "bytes": 1054912,
+        "sha256": "ebcba0442d682d9c6bf03ac2e7cd33beb8cc008c82f5e7743b654ed6d73903a4"
+      }
+    }
+  },
+  "model": {
+    "name": "Pi05_libero",
+    "directory": "model/Pi05_libero",
+    "precision": "w8",
+    "archive_sha256": "0bd0c8cadb195e593a307a014a5bcd0d3f21816d1e070c2323d2aa33f6386fca",
+    "files": {
+      "pi05_vision_224x224_w8_nash-p_corenum_1.hbm": {
+        "bytes": 486270872,
+        "sha256": "d412027febdafc8585955dd93084663836c7f71d11b7c91f7d6dcd7f3be096c5"
+      },
+      "pi05_language_w8_nash-p_corenum_4.hbm": {
+        "bytes": 3321641544,
+        "sha256": "7557c9368cc642c684305feb59160f9c87bb0c130a223d1e1cc059ba9f3eb293"
+      },
+      "pi05_action_ah_10_w8_nash-p_corenum_4.hbm": {
+        "bytes": 419960696,
+        "sha256": "f8e06e7e49ffa8459e0e420035f6b3ad9341a587e04b9c00ed258dd83ddd181e"
+      },
+      "norm_stats.json": {
+        "bytes": 1914,
+        "sha256": "b3a44bb2810436fb62917decaea58bd4d9110255df527dea21e8fd40c960bd84"
+      },
+      "tokenizer.model": {
+        "bytes": 4264023,
+        "sha256": "8986bb4f423f07f8c7f70d0dbe3526fb2316056c17bae71b1ea975e77a168fc6"
+      },
+      "tokenizer.json": {
+        "bytes": 17549604,
+        "sha256": "ef6773c135b77b834de1d13c75a4c98ab7a3684ffd602d1831e1f1bf5467c563"
+      },
+      "tokenizer_config.json": {
+        "bytes": 39968,
+        "sha256": "3259402b1d1802e02417d7bff75a889ec61d359d15be6050a957b307c48edbbe"
+      }
+    }
+  },
+  "runtime_config": {
+    "path": "examples/vla_demo/pi0/pi05_libero_config.json",
+    "bytes": 897,
+    "sha256": "38facf55f7f7ef02380e353786c2750e0ad5bfc1a776e151bfce689bdcb3b0fe",
+    "expect": {
+      "runtime_type": "Pi0Sdk",
+      "model.version": "0.5",
+      "model.denoise_num": 10,
+      "model.work_path": "../../../model/Pi05_libero",
+      "model.model_runner.visual": "pi05_vision_224x224_w8_nash-p_corenum_1.hbm",
+      "model.model_runner.lm": "pi05_language_w8_nash-p_corenum_4.hbm",
+      "model.model_runner.action": "pi05_action_ah_10_w8_nash-p_corenum_4.hbm",
+      "interface.action_horizon": 10,
+      "interface.raw_state_size": 8,
+      "interface.raw_action_size": 7,
+      "interface.image_mask": [
+        true,
+        true,
+        false
+      ],
+      "processing.preproc": true,
+      "processing.postproc": true,
+      "processing.filter.type": "none",
+      "processing.use_absolute_action": true,
+      "processing.use_quantiles_norm": true
+    },
+    "absent": [
+      "model.state_size",
+      "processing.inject_state",
+      "processing.use_bgr",
+      "processing.use_hwc",
+      "processing.image_noise",
+      "warm_start",
+      "rtc"
+    ]
+  },
+  "camera": {
+    "slots": [
+      {
+        "slot": 0,
+        "role": "base",
+        "masked": false
+      },
+      {
+        "slot": 1,
+        "role": "wrist",
+        "masked": false
+      },
+      {
+        "slot": 2,
+        "role": "unused",
+        "masked": true
+      }
+    ],
+    "input": {
+      "dtype": "uint8",
+      "layout": "HWC",
+      "channels": 3,
+      "color": "RGB",
+      "encoding": "raw array; JPEG is not allowed"
+    },
+    "model_shape": [
+      224,
+      224,
+      3
+    ],
+    "resize": {
+      "owner": "apx_drobotics.preprocess",
+      "function": "letterbox to model_shape, as openpi_client.image_tools.resize_with_pad",
+      "kernel": "PIL.BILINEAR",
+      "at_model_shape": "passed through unchanged"
+    },
+    "runtime_behaviour": {
+      "at_224": "passed through unchanged",
+      "other_sizes": "cv2.INTER_LINEAR without antialiasing; preprocess resizes first so the runtime never takes this path",
+      "tensor": "fp16 CHW, pixel * 2 / 255 - 1"
+    }
+  },
+  "state": {
+    "dim": 8,
+    "input_dtype": "float32",
+    "used_by_model": false,
+    "components": [
+      "eef_pos_x",
+      "eef_pos_y",
+      "eef_pos_z",
+      "eef_axis_angle_x",
+      "eef_axis_angle_y",
+      "eef_axis_angle_z",
+      "gripper_qpos_left",
+      "gripper_qpos_right"
+    ],
+    "note": "Required and validated, but the runtime does not read it under this config: the HBM has no state tensor and inject_state is off."
+  },
+  "prompt": {
+    "type": "utf-8 string",
+    "cleaning": [
+      "strip surrounding whitespace",
+      "replace _ with a space",
+      "replace newline with a space"
+    ],
+    "cleaning_owner": "apx_drobotics.preprocess",
+    "tokenizer_file": "tokenizer.json",
+    "bos_token": 2,
+    "newline_token": 108,
+    "pad_token": 0,
+    "token_buffer": 200,
+    "encoding": "[bos] + encode(prompt + newline), zero-padded to token_buffer"
+  },
+  "action": {
+    "horizon": 10,
+    "dim": 7,
+    "components": [
+      "eef_delta_x",
+      "eef_delta_y",
+      "eef_delta_z",
+      "eef_delta_axis_angle_x",
+      "eef_delta_axis_angle_y",
+      "eef_delta_axis_angle_z",
+      "gripper"
+    ],
+    "model_output_dim": 32,
+    "normalization": {
+      "kind": "quantile",
+      "stats": "norm_stats.json actions.q01/q99",
+      "formula": "(y + 1) / 2 * (q99 - q01 + eps) + q01",
+      "eps": 1e-06
+    },
+    "postprocess": "none: no delta integration, no filter, no clipping in the runtime",
+    "controller": {
+      "type": "robosuite OSC_POSE",
+      "input_range": [
+        -1.0,
+        1.0
+      ],
+      "output_max_position_m": 0.05,
+      "output_max_rotation_rad": 0.5
+    },
+    "gripper": {
+      "index": 6,
+      "open": -1.0,
+      "close": 1.0
+    },
+    "runtime_dtype": "float64",
+    "output_dtype": "float32"
+  },
+  "noise": {
+    "owner": "runtime",
+    "client_settable": false,
+    "behaviour": "fixed sequence per process, advanced once per inference call",
+    "consequence": "Outputs are reproducible only for the same call order within a fresh process."
+  },
+  "metadata": {
+    "model_type": "pi05_drobotics_w8",
+    "precision": "w8",
+    "sdk_version": "2.0.0",
+    "image_shape": [
+      224,
+      224,
+      3
+    ],
+    "num_views": 2,
+    "state_dim": 8,
+    "action_horizon": 10,
+    "action_dim": 7,
+    "discrete_state": false
+  },
+  "timeouts": {
+    "ready_seconds": 120,
+    "infer_deadline_seconds": 5,
+    "cold_start_seconds_measured": 13.5,
+    "stable_infer_ms_measured": 143
+  }
+}

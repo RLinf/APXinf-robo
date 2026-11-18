@@ -32,6 +32,10 @@ isaaclab = ["pillow", "openpi-client", "typing-extensions"]
 lerobot = ["torch"]
 serve = ["websockets", "msgpack"]
 dev = ["pytest>=7", "ruff"]
+# What the S600-engine end-to-end tests import besides apx-drobotics itself (install
+# that with `pip install -e ./apx-drobotics[serve]`). Without these the tests skip;
+# set APXINF_ROBO_REQUIRE_OPTIONAL=1 to make a missing one fail instead.
+drobotics-test = ["pillow", "openpi-client", "typing-extensions", "msgpack", "websockets"]
 
 [project.scripts]
 apxinf-robo = "apxinf_robo.cli.__main__:main"
