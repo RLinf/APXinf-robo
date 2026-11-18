@@ -39,6 +39,20 @@ def _golden_g1(case):
     return lambda tag: GOLDEN[f"g1/{case}/{tag}"]
 
 
+def _same_up_to_matmul(actual, expected):
+    """Exact dtype and shape; values to a few ulp of float64.
+
+    Only the dual-Franka composition uses ``@``. Its float64 result is the same
+    mathematics through BLAS, and the kernel (hence the last bit) differs between numpy
+    builds: numpy 1.26 here gives bit-identical values to the fixture, a CI machine on
+    numpy 2.5 differs by ~4e-16. The element-wise G1 and YAM paths stay bit-exact above.
+    """
+    actual = np.asarray(actual)
+    assert actual.dtype == expected.dtype
+    assert actual.shape == expected.shape
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
 @pytest.mark.parametrize("case", ["f32", "f64", "i64", "clip"])
 def test_g1_transform_reproduces_golden(case):
     from apxinf_robo.embodiments.unitree_g1.transform import (
@@ -151,7 +165,7 @@ def test_dual_franka_transform_reproduces_golden(case):
     transform = DualFrankaTransform(KEY)
     prepared = transform.before({KEY: state})
     _same(prepared[KEY], GOLDEN[f"dual_franka/{case}/reordered"])
-    _same(transform.after(raw, prepared), GOLDEN[f"dual_franka/{case}/out"])
+    _same_up_to_matmul(transform.after(raw, prepared), GOLDEN[f"dual_franka/{case}/out"])
     np.testing.assert_array_equal(state, kept[0])
     np.testing.assert_array_equal(raw, kept[1])
 
@@ -166,9 +180,9 @@ def test_yam_and_dual_franka_wrappers_over_a_fake_engine():
         raw = GOLDEN[f"{body}/f64/raw"]
         inner = _ConstantPolicy(raw)
         policy = TransformedPolicy(inner, transform, action_dim=width)
-        key = "out"
         result = policy.infer({KEY: GOLDEN[f"{body}/f64/state"]})
-        _same(result["actions"], GOLDEN[f"{body}/f64/{key}"])
+        compare = _same_up_to_matmul if body == "dual_franka" else _same
+        compare(result["actions"], GOLDEN[f"{body}/f64/out"])
         # The model is handed the transformed state: reordered for dual-Franka.
         seen = inner.seen[0][KEY]
         np.testing.assert_array_equal(
