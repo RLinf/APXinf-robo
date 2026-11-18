@@ -1098,6 +1098,22 @@ class StateKeyIsRequiredWhenItIsReadTest(unittest.TestCase):
         self.assertIn("state_key", message)
         self.assertIn("discrete_state=False", message)
 
+    def test_infer_result_metadata_describes_the_wrapped_policy(self) -> None:
+        # Real Pi05Policy under the G1 transform: the result's own description must agree with
+        # the actions it carries, not with the 32-wide engine underneath.
+        policy = build_g1_mock_policy()
+        inner = policy._inner
+        inner_before = dict(inner.metadata)
+        result = policy.infer(g1_observation(np.zeros(G1_ROBOT_DIM, dtype=np.float32)))
+        shape = np.asarray(result["actions"]).shape
+        self.assertEqual(shape, (HORIZON, G1_ROBOT_DIM))
+        self.assertEqual(result["metadata"], policy.metadata)
+        self.assertEqual(result["metadata"]["action_dim"], shape[-1])
+        self.assertEqual(result["metadata"]["robot"], "unitree_g1")
+        self.assertEqual(inner.metadata, inner_before)
+        self.assertEqual(inner.metadata["action_dim"], MODEL_DIM)
+        self.assertNotIn("robot", inner.metadata)
+
     def test_the_published_contract_may_say_no_state_key(self) -> None:
         # A policy that drops state has no state key to publish, and null is the
         # honest answer — a client reading metadata sees that state is unused.
