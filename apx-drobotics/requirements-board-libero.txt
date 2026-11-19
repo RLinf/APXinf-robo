@@ -1,6 +1,6 @@
 # Exact Python packages for in-process LIBERO evaluation on the S600 board
-# (Ubuntu 24.04, Python 3.12, aarch64). Installed by
-# `deploy.sh --with-libero` into the same virtual environment as apx-drobotics.
+# (Ubuntu 24.04, Python 3.12, aarch64). Installed by the in-process LIBERO steps in
+# doc/tutorial-pi0.5-on-drobotics.md, into the same virtual environment as apx-drobotics.
 #
 # Only what the evaluation path needs. LIBERO's own requirements.txt also pins
 # wandb, transformers, thop, einops and a 2022 matplotlib; those belong to its
@@ -29,14 +29,14 @@ tqdm==4.70.1
 termcolor==3.3.0
 future==1.0.0
 
-# torch is installed separately by deploy.sh, from the CPU index
+# torch is installed separately, from the CPU index
 # (https://download.pytorch.org/whl/cpu). PyPI's aarch64 build is a CUDA build
 # and fails at import with "libcudart.so.13: cannot open shared object file";
 # LIBERO only uses torch.load to read the initial states. The version is pinned
-# here, and deploy.sh reads it back out of this file.
+# here; the tutorial reads it back out of this file.
 torch==2.5.1
 
 # numpy and pillow are pinned by requirements-board.txt: the letterbox resize
 # moved from the PC to the board and has to stay byte for byte the same, so the
-# LIBERO install must not disturb them. deploy.sh passes both files to pip with
+# LIBERO install must not disturb them. the tutorial passes both files to pip with
 # the base file as a constraint.
