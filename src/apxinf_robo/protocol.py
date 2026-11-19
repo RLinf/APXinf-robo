@@ -96,7 +96,9 @@ class TransformedPolicy:
 
     This is how a body reaches either engine: the wrapper needs only ``inner`` to satisfy
     :class:`Policy`. Everything else in the result (``normalized_actions``, ``token_ids``,
-    whatever the engine adds) passes through untouched, and ``timing`` keeps the engine's
+    whatever the engine adds) passes through untouched, except ``metadata``: if the engine
+    returns one it is replaced by a copy of this policy's, so it describes the actions
+    actually returned (an engine that returns none still returns none). ``timing`` keeps the engine's
     entries with the transform's own time added to ``total_ms`` and reported as
     ``robot_ms``.
 
@@ -146,6 +148,10 @@ class TransformedPolicy:
         result = dict(self._inner.infer(prepared, **({} if noise is None else {"noise": noise})))
         started = time.perf_counter()
         result["actions"] = self._transform.after(result["actions"], prepared)
+        if "metadata" in result:
+            # The engine describes its own actions; these are the wrapped ones. A copy, so a
+            # caller editing the result cannot change this policy's metadata.
+            result["metadata"] = dict(self.metadata)
         robot_ms += (time.perf_counter() - started) * 1000.0
         timing = dict(result.get("timing", {}))
         timing["robot_ms"] = robot_ms

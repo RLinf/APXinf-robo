@@ -215,6 +215,31 @@ class _RecordingModel:
         return self._model.infer_rgb(rgb_u8, layout, token_ids, noise)
 
 
+def _engine_policy(policy):
+    """The policy that owns the model: ``policy`` itself, or what a robot transform wraps.
+
+    ``build_robot_policy`` returns a ``TransformedPolicy`` for a body with a transform, and
+    that wrapper deliberately has no ``model_runner``. The recorder has to sit on the engine
+    underneath, so the call is recorded where the model is actually invoked.
+    """
+    while not hasattr(policy, "model_runner"):
+        inner = getattr(policy, "_inner", None)
+        if inner is None:
+            raise AssertionError(
+                f"no model_runner on {type(policy).__name__} or anything it wraps"
+            )
+        policy = inner
+    return policy
+
+
+def install_recorder(policy) -> "_RecordingModel":
+    """Record the model calls of ``policy``'s engine; ``policy.infer`` still runs it all."""
+    engine = _engine_policy(policy)
+    recorder = _RecordingModel(engine.model_runner)
+    engine.model_runner = recorder
+    return recorder
+
+
 class RecordingModelTest(unittest.TestCase):
     """The recorder is what makes the L1/L2 boundary observable, so pin it.
 
@@ -288,8 +313,7 @@ class NumericParityTest(unittest.TestCase):
         policy = build_robot_policy(
             ROBOT, CHECKPOINT, device=DEVICE, precision=PRECISION
         )
-        recorder = _RecordingModel(policy.model_runner)
-        policy.model_runner = recorder
+        recorder = install_recorder(policy)
 
         # Pin the noise: with internal sampling the two runs draw from different
         # RNG streams and would differ for a reason that is not drift.
