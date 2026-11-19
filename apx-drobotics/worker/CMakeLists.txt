@@ -5,7 +5,7 @@ project(drobotics_pi05_worker CXX)
 #   cmake -S apx-drobotics/worker -B apx-drobotics/build/worker \
 #     -DOELLM_ROOT=/opt/d-robotics-llm/2.0.0/D-Robotics_LLM_2.0.0_S600_S100_SDK/oellm_runtime_s600
 #   cmake --build apx-drobotics/build/worker
-# apx-drobotics/scripts/deploy.sh runs these steps.
+# See doc/tutorial-pi0.5-on-drobotics.md for the full deployment steps.
 
 set(OELLM_ROOT "" CACHE PATH "Path to the SDK's oellm_runtime_s600 directory")
 if(NOT EXISTS "${OELLM_ROOT}/include/oellm_runtime_basic/oellm_runtime.h")
@@ -28,13 +28,10 @@ target_include_directories(drobotics_pi05_worker PRIVATE
   "${OELLM_ROOT}/3rdparty")
 # libvla_pi0_sdk registers the "Pi0Sdk" runtime type from a static initializer,
 # so it must stay linked even though no symbol in this file references it.
-# libvla_sdk.so in SDK v2.0.0 references oellm::component::Tokenizer::~Tokenizer(),
-# which no SDK library exports. The official demo runs with it unresolved, so the
-# link allows it rather than failing; the loader binds functions lazily.
-# TODO: --allow-shlib-undefined is global, so it would also hide any *other* symbol the
-# SDK libraries later fail to export. Track the SDK-side fix in an upstream issue and
-# delete the flag once Tokenizer::~Tokenizer is exported; until then, after an SDK
-# upgrade, re-check with `ldd -r` on the built worker for unresolved symbols.
+# Do not add -Wl,--allow-shlib-undefined. The first SDK v2.0.0 build had a dangling
+# reference to oellm::component::Tokenizer::~Tokenizer() in libvla_sdk.so and needed
+# it; the fixed build links cleanly. The flag is global, so it would hide any real
+# unresolved symbol. After an SDK upgrade, run `ldd -r` on the built worker.
 target_link_libraries(drobotics_pi05_worker PRIVATE
   -Wl,--no-as-needed
   "${PI0_DIST}/libvla_pi0_sdk.so"
@@ -42,7 +39,6 @@ target_link_libraries(drobotics_pi05_worker PRIVATE
   "${OELLM_LIB}/liboellm_runtime.so"
   -Wl,--as-needed
   "-Wl,-rpath-link,${OELLM_LIB}"
-  -Wl,--allow-shlib-undefined
   -Wl,-z,lazy
   dl pthread)
 # The SDK libraries load further SDK libraries (libchat_template.so and others)
