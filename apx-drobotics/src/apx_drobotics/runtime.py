@@ -30,7 +30,7 @@ __all__ = ["DEFAULT_SDK_ROOT", "DEFAULT_WORKER", "L2M_SIZES", "Worker"]
 DEFAULT_SDK_ROOT = Path(
     "/opt/d-robotics-llm/2.0.0/D-Robotics_LLM_2.0.0_S600_S100_SDK/oellm_runtime_s600"
 )
-#: Where ``scripts/deploy.sh`` builds the worker, for a source checkout of this package.
+#: Where the tutorial's build step puts the worker, for a source checkout of this package.
 DEFAULT_WORKER = Path(__file__).resolve().parents[2] / "build/worker/drobotics_pi05_worker"
 #: The official run.sh sets this before starting the demo; runtime init fails without it.
 L2M_SIZES = "6:6:6:6"

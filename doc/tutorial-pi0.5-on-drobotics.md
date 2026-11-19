@@ -1,16 +1,9 @@
 # 在 RDK S600 上用 π0.5 跑 LIBERO 评测
 
-这篇教程说明如何把地瓜机器人 RDK S600 当作 π0.5 的推理端，接到本仓库的 LIBERO 评测器上：
+这篇教程说明如何把地瓜机器人 RDK S600 当作 π0.5 的推理端，接到本仓库的 LIBERO 评测器上。
+评测有两种形式：websocket 或 in-process，两种方式用的是同一个推理引擎，区别只在评测器怎么把观测送给模型：WebSocket 方式经过服务，进程内方式由评测器直接调用 `policy.infer`。
 
-```text
-PC：LIBERO 仿真 + apxinf-robo eval-libero
-        │  OpenPI WebSocket（图像、状态、指令 → 动作块）
-        ▼
-S600：apxinf-robo serve --engine drobotics
-        └─ apx_drobotics：preprocess → C++ 推理进程 → 地瓜 SDK v2.0.0 → BPU → postprocess
-```
-
-板上运行的是地瓜官方的 `Pi05(libero)` W8 模型和 LLM SDK v2.0.0 运行时，**不使用 ApxInf**。ApxInf 不支持 BPU，所以 S600 这部分封装成了和 ApxInf 并列的 `apx-drobotics`，上层的 apxinf-robo 两边共用。整个仓库部署在板上，只是不需要 `apxinf/` 子模块。
+板上运行的是地瓜官方的 `Pi05(libero)` W8 模型和 LLM SDK v2.0.0 运行时（修复了 `Tokenizer::~Tokenizer` 悬空符号的版本，见第一步），**不使用 ApxInf**。ApxInf 不支持 BPU，所以 S600 这部分封装成了和 ApxInf 并列的 `apx-drobotics`，上层的 apxinf-robo 两边共用。整个仓库部署在板上，只是不需要 `apxinf/` 子模块。
 
 PC 端的评测器和连接其他服务时一样，只要指定 `--precision w8`。PC 上也不需要安装 ApxInf。
 
@@ -23,7 +16,7 @@ PC 端的评测器和连接其他服务时一样，只要指定 `--precision w8`
 | 系统 | RDK S600 V5.1.0 及以上（地瓜对 SDK v2.0.0 的要求） |
 | BPU 内存（ION） | carveout 至少约 5 GB，且能放下一块约 3.4 GB 的连续内存 |
 | 磁盘 | 部署过程中约 8 GB，部署完成后约 4.4 GB |
-| 网络 | 能访问 `d-robotics-aitoolchain.oss-cn-beijing.aliyuncs.com`，用于下载 SDK 和模型 |
+| 网络 | 能下载 SDK 和模型（地址见第一步） |
 | 软件 | `python3`（含 venv）、`g++`、`cmake`、`curl` |
 
 ION 不够时，模型加载会报 `Memory alloc failed`。默认的 `cpu_first` 布局里 carveout 只有 2 GiB，放不下 3.32 GB 的语言模型。要在**宿主机**上执行 `/usr/hobot/bin/hb_switch_ion.sh balanced` 再重启，Docker 容器里改不了。确认方法：
@@ -38,21 +31,70 @@ grep -E "total size" /sys/kernel/debug/ion/heaps/carveout
 
 ## 第一步：在板上部署
 
-在板上取得本仓库的代码（不需要初始化子模块），然后运行部署脚本：
+不再提供一键部署脚本，按下面的步骤手动执行。先在板上取得本仓库的代码（不需要初始化子模块），并设置变量，后面的命令都用到它们：
 
 ```bash
-bash apx-drobotics/scripts/deploy.sh        # 默认部署到 /opt/d-robotics-llm/2.0.0
+export ROOT=/opt/d-robotics-llm/2.0.0
+export SDK_DIR=$ROOT/D-Robotics_LLM_2.0.0_S600_S100_SDK/oellm_runtime_s600
+export VENV=$ROOT/venv-apx-drobotics
+export CONTRACT=$PWD/apx-drobotics/src/apx_drobotics/contracts/pi05_libero_w8.json   # 在仓库根目录执行
+mkdir -p $ROOT/.downloads
 ```
 
-脚本会依次完成下面这些步骤，已经做过的会跳过，所以可以放心重复运行：
+**1. 下载并解压 SDK（约 1.2 GB）**
 
-1. 下载 SDK（约 1.2 GB），用契约里记录的 SHA-256 校验，只解压板端运行时。
-2. 下载 `Pi05_libero.zip`（约 3.2 GB），校验后解压到 SDK 的模型目录，再删除压缩包。
-3. 创建 Python 虚拟环境，安装 `apx-drobotics/requirements-board.txt` 中固定版本的依赖，再安装 apx-drobotics 和 apxinf-robo。
-4. 编译 C++ 推理进程，产物在 `apx-drobotics/build/worker/`。
-5. 用契约检查整个部署：SDK 库、三段 HBM、tokenizer、归一化统计、运行时配置，逐个比对大小和 SHA-256。
+> 修复版 SDK 尚未发布，下面的地址是占位，发布后替换。修复前的 v2.0.0 在 `libvla_sdk.so` 里留有对 `oellm::component::Tokenizer::~Tokenizer()` 的悬空引用，链接 worker 会失败，**不要用旧包**。
 
-第一次部署的时间主要花在下载上。最后一步通过才算部署完成。
+```bash
+SDK_URL=https://<待发布：地瓜 SDK 下载地址>/D-Robotics_LLM_2.0.0_S600_S100_SDK.tar.gz
+curl -fL --retry 10 --retry-delay 5 -C - -o $ROOT/.downloads/sdk.tar.gz "$SDK_URL"
+sha256sum $ROOT/.downloads/sdk.tar.gz        # 与地瓜发布的 SHA-256 核对，不一致就不要继续
+tar -xzf $ROOT/.downloads/sdk.tar.gz -C $ROOT \
+  --exclude='*/oellm_runtime_s600/arm-gnu-toolchain-*' \
+  D-Robotics_LLM_2.0.0_S600_S100_SDK/oellm_runtime_s600
+rm $ROOT/.downloads/sdk.tar.gz
+```
+
+只需要板端运行时 `oellm_runtime_s600`，里面的 x86 交叉编译器用不到，所以排除。契约里固定了 `libvla_sdk.so`、`liboellm_runtime.so` 等库的 SHA-256，第 5 步会逐个核对，所以换 SDK 包后数值对不上时，要先确认包是对的，再更新契约。
+
+**2. 下载并解压模型 `Pi05_libero`（约 3.2 GB）**
+
+```bash
+MODEL_URL=https://d-robotics-aitoolchain.oss-cn-beijing.aliyuncs.com/llm/2.0.0/s600_models/Pi05_libero.zip
+curl -fL --retry 10 --retry-delay 5 -C - -o $ROOT/.downloads/Pi05_libero.zip "$MODEL_URL"
+sha256sum $ROOT/.downloads/Pi05_libero.zip
+# 应为 0bd0c8cadb195e593a307a014a5bcd0d3f21816d1e070c2323d2aa33f6386fca
+unzip -q $ROOT/.downloads/Pi05_libero.zip -d $SDK_DIR/model      # 压缩包内顶层目录就是 Pi05_libero
+rm $ROOT/.downloads/Pi05_libero.zip
+```
+
+**3. 创建 Python 虚拟环境并安装**
+
+```bash
+python3 -m venv $VENV
+$VENV/bin/python -m pip install -r apx-drobotics/requirements-board.txt
+$VENV/bin/python -m pip install --no-deps -e apx-drobotics -e .
+```
+
+**4. 编译 C++ 推理进程**
+
+```bash
+cmake -S apx-drobotics/worker -B apx-drobotics/build/worker -DOELLM_ROOT=$SDK_DIR
+cmake --build apx-drobotics/build/worker -j$(nproc)
+ldd -r apx-drobotics/build/worker/drobotics_pi05_worker | grep -iE "undefined|not found"   # 应无输出
+```
+
+链接选项里**不要**加 `-Wl,--allow-shlib-undefined`。链接报未解析符号说明 SDK 包不对或不完整，应当暴露出来，不要用这个选项压下去。
+
+**5. 用契约检查整个部署**
+
+```bash
+$VENV/bin/apx-drobotics check-deployment --contract $CONTRACT --sdk-root $SDK_DIR
+```
+
+会逐个比对 SDK 库、三段 HBM、tokenizer、归一化统计、运行时配置的大小和 SHA-256，约需几十秒，要读 4 GB 文件。这一步通过才算部署完成。
+
+每一步都可以单独重做。SDK 或模型目录里有文件被改过时，删除对应目录再从那一步重来。
 
 ## 第二步：启动服务
 
@@ -91,6 +133,88 @@ apxinf-robo eval-libero --backend websocket --host <板子地址> --port 8000 \
 
 结果文件的每一行都记录服务端发布的契约哈希、SDK 版本，以及 `replan_steps` 等评测设置。续跑时如果这些和结果文件里记录的不同，评测器会拒绝继续，避免不同配置的结果混进同一个成功率。所以换了契约版本后要用新的结果文件。
 
+## 另一种方式：在板上进程内评测
+
+仿真、评测器和推理都放在板子上，不起服务，也没有 WebSocket：
+
+```text
+S600：apxinf-robo eval-libero --backend in-process --engine drobotics
+        ├─ LIBERO 仿真（osmesa 软件渲染）
+        └─ apx_drobotics：preprocess → C++ 推理进程 → 地瓜 SDK v2.0.0 → BPU → postprocess
+```
+
+评测器在自己的进程里通过 `build_robot_policy("franka_libero", ..., engine="drobotics")` 构建策略，每一步直接调用 `policy.infer`。推理进程仍然是独立的 C++ 子进程，Python 进程和它之间用管道通信，所以这里的"进程内"指的是评测器和策略在同一个 Python 进程，不是 BPU 推理在同一个进程。
+
+适合的场景：板子上没有可用的 PC 联网环境，或者想排除网络的影响，只测模型本身的成功率和延迟。代价是板上要装仿真依赖，CPU 渲染也会占用板子的算力。
+
+**部署**：先完成第一步，再额外安装仿真依赖（约 5 GB 磁盘、1.5 GB 下载）。只提供推理服务用不到这一步。
+
+```bash
+# 1. 系统库：板上用 OSMesa 渲染
+apt-get update && apt-get install -y libosmesa6
+
+# 2. 仿真依赖。requirements-board.txt 作为约束，避免 numpy、pillow 被改动（缩放依赖它们）
+grep -v '^torch==' apx-drobotics/requirements-board-libero.txt > /tmp/req-libero.txt
+$VENV/bin/python -m pip install -c apx-drobotics/requirements-board.txt -r /tmp/req-libero.txt
+
+# 3. torch 单独从 CPU 源装：PyPI 的 aarch64 版是 CUDA 版，板上没有 CUDA 运行时，导入会失败
+TORCH_PIN=$(grep -oE '^torch==[^[:space:]]+' apx-drobotics/requirements-board-libero.txt)
+$VENV/bin/python -m pip install --force-reinstall --no-deps \
+  --index-url https://download.pytorch.org/whl/cpu "$TORCH_PIN"
+
+# 4. LIBERO 不在 PyPI，按固定提交克隆（板上直连 github 不稳定，用镜像）
+git clone https://ghfast.top/https://github.com/Lifelong-Robot-Learning/LIBERO.git $ROOT/LIBERO
+git -C $ROOT/LIBERO checkout 8f1084e3132a39270c3a13ebe37270a43ece2a01
+touch $ROOT/LIBERO/libero/__init__.py       # 上游没有提交这个文件，缺它 import 会失败
+
+# 5. LIBERO 缺配置文件时会在 stdin 上等输入，无人值守会卡住，所以预先写好
+mkdir -p $ROOT/libero-config
+cat > $ROOT/libero-config/config.yaml <<EOF
+benchmark_root: $ROOT/LIBERO/libero/libero
+bddl_files: $ROOT/LIBERO/libero/libero/bddl_files
+init_states: $ROOT/LIBERO/libero/libero/init_files
+datasets: $ROOT/LIBERO/datasets
+assets: $ROOT/LIBERO/libero/libero/assets
+EOF
+
+# 6. 把 LIBERO 目录放进 sys.path，不用 pip 安装（它的 setup.py 找不到嵌套的 libero/libero）
+SITE=$($VENV/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+echo $ROOT/LIBERO > $SITE/libero_checkout.pth
+```
+
+**运行**：不需要第二步启动服务。渲染相关的环境变量要自己设：
+
+```bash
+export MUJOCO_GL=osmesa LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe \
+       TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1 LIBERO_CONFIG_PATH=$ROOT/libero-config
+$VENV/bin/apxinf-robo eval-libero --backend in-process --engine drobotics \
+  --precision w8 --model-dir $SDK_DIR \
+  --suite libero_object --trials-per-task 10 \
+  --results-jsonl results.jsonl --summary-json summary.json
+```
+
+这里用 `osmesa` 而不是 `egl`：板上的 EGL 是厂商版本，缺少 mujoco 枚举设备所需的 `eglQueryDevicesEXT`。`TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1` 的原因见常见问题。
+
+**与 WebSocket 方式的区别**：
+
+| 项目 | WebSocket | 进程内 |
+| --- | --- | --- |
+| 运行位置 | PC 跑评测，板子跑服务 | 全部在板子上 |
+| 启动服务 | 需要（第二步） | 不需要 |
+| `--backend` | `websocket`（加 `--host`、`--port`） | `in-process`（加 `--engine drobotics`） |
+| `--precision` | `w8` | 必须是 `w8` |
+| 模型目录 | 服务端的 `--model-dir` | 评测器自己的 `--model-dir` |
+| 部署检查 | 服务启动时 | 评测器构建策略时，同样按契约检查 |
+| 发送给模型的内容 | 原始图像、状态、指令，缩放和清洗在板上完成 | 相同，走同一个 `apx_drobotics.preprocess` |
+| 网络耗时 | 评测器单独记录 | 约为 0 |
+| 契约哈希、SDK 版本等 | 服务端发布，连接时核对 | 直接取自策略，同样写入结果文件 |
+
+两种方式的动作输出走的是同一套前后处理，所以成功率可以直接比较。续跑和身份校验的规则也一样：契约哈希、SDK 版本、worker 的哈希或评测设置变了，评测器会拒绝继续，要换新的结果文件。
+
+**参数限制**：`--engine drobotics` 只能和 `--backend in-process` 一起用。`--checkpoint`、`--device`、`--norm-stats`、`--num-flow-steps`、`--model-seed`、`--warm-start` 等只有 ApxInf 才支持的参数会直接报错。其中 `--model-seed` 和 `--warm-start` 要特别注意：S600 运行时自己采样噪声，这两个参数不起作用，所以宁可拒绝，也不让人以为结果可以靠 `--seed` 复现。
+
+推理进程崩溃或超时时，策略会抛出错误。重新运行同一条命令即可，评测器按结果文件里已有的记录续跑（前提是配置没变，规则见第三步）。
+
 ## 这些约定是怎么来的
 
 运行时的约定都写在[契约文件](../apx-drobotics/src/apx_drobotics/contracts/pi05_libero_w8.json)里，由 [`contract.py`](../apx-drobotics/src/apx_drobotics/contract.py) 在部署、启动和每次推理时检查。键名不在契约里，它们属于上层，和 ApxInf 一样。下面几条是实测后定下来的，修改前请先了解原因：
@@ -108,7 +232,7 @@ apxinf-robo eval-libero --backend websocket --host <板子地址> --port 8000 \
 
 ## 参考数据
 
-在 RDK S600（V5.1.0，SDK v2.0.0）上实测：
+在 RDK S600（V5.1.0，SDK v2.0.0）上实测（修复版 SDK 与旧版在同一输入下动作输出逐字节相同）：
 
 | 项目 | 数值 |
 | --- | --- |
@@ -128,7 +252,7 @@ apxinf-robo eval-libero --backend websocket --host <板子地址> --port 8000 \
 - 模型目录里放的是 `Pi05_shoes` 等其他模型。
 - 部署不完整。
 
-重新运行部署脚本可以补上缺失的部分。脚本只看 SDK 目录和模型目录在不在，所以文件被改过时，要先删除对应的整个目录，脚本才会重新下载。
+按第一步重做缺失或被改过的部分：删除对应的 SDK 或模型目录，重新下载解压，再跑第 5 步的检查。
 
 **评测器连接时报 `server precision is ...` 或 `server input fields do not match`**：连上的不是这个服务，或者服务用 `--image-keys` 等参数改过键名。
 
@@ -144,7 +268,7 @@ apxinf-robo eval-libero --backend websocket --host <板子地址> --port 8000 \
 
 | 文件 | 作用 |
 | --- | --- |
-| `apx-drobotics/scripts/deploy.sh` | 板上部署 |
+| `apx-drobotics/requirements-board-libero.txt` | 进程内评测的仿真依赖 |
 | `apx-drobotics/src/apx_drobotics/serving.py` | 板上的 WebSocket 服务 |
 | `apx-drobotics/worker/` | C++ 推理进程，调用地瓜 SDK |
 | `apx-drobotics/requirements-board.txt` | 板上的 Python 依赖 |

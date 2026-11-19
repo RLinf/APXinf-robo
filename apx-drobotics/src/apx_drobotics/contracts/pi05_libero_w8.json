@@ -1,10 +1,9 @@
 {
   "contract_id": "drobotics-pi05-libero-w8",
-  "contract_version": 2,
+  "contract_version": 3,
   "sdk": {
     "version": "2.0.0",
     "runtime_type": "Pi0Sdk",
-    "archive_sha256": "c6e41728e5dc482530225bb28093e9958b255595b88eba9bf181bbc8892fe70b",
     "files": {
       "examples/vla_demo/pi0/dist/libvla_pi0_sdk.so": {
         "bytes": 236704,
@@ -12,11 +11,11 @@
       },
       "lib/liboellm_runtime.so": {
         "bytes": 16958360,
-        "sha256": "4eba90802e0fa51c0cb6e2fe56f9966ad29ee5b0a94d4abae0a206226758ebf0"
+        "sha256": "4d60ead759e7bac6b6e6f7aaf8ee00a1c01d9cd2d4314ad66866125e9135ea9c"
       },
       "lib/libvla_sdk.so": {
-        "bytes": 490816,
-        "sha256": "fe7770f29f0f49c964097f86b9d29fe256a4894ed021deb6a4b48a76afefb37c"
+        "bytes": 490456,
+        "sha256": "ee37466a454057fe02191dab721b2f1fd82e02d7ee5999d58d6079b9ff9945d3"
       },
       "lib/libdnn.so": {
         "bytes": 1709632,
