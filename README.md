@@ -100,6 +100,11 @@ steady-state CUDA Graph replay P50.
 | Jetson AGX Orin | BF16 | 165.67 ms | 6.0 Hz |
 | RTX 4090 | BF16 | 31.38 ms | 31.9 Hz |
 | RTX 4090 | INT8 | 25.99 ms | 38.5 Hz |
+| A800-SXM4-80GB | BF16 | 29.08 ms | 34.4 Hz |
+
+A800 cells are L0 after one `--autotune` on a standalone engine checkout
+at `95e0af3`. L1 is 0.3–0.5 ms lower. Details:
+[doc/pi05-on-a800-sm80.md](doc/pi05-on-a800-sm80.md).
 
 With onestep action generation pruning. We integrate STEP (https://arxiv.org/pdf/2602.08245), the ICML 2026 warm-start few-step method, into this repo.
 
@@ -109,6 +114,7 @@ With onestep action generation pruning. We integrate STEP (https://arxiv.org/pdf
 | Jetson AGX Thor | FP8 | 26.32 ms | 38.0 Hz |
 | Jetson AGX Orin | BF16 | 119.05 ms | 8.4 Hz |
 | RTX 4090 | BF16 | 20.36 ms | 49.1 Hz |
+| A800-SXM4-80GB | BF16 | 17.23 ms | 58.0 Hz |
 
 LIBERO-10, 10 tasks x 50 episodes, `H=10`, `replan=5`, seed 7. PI0.5 reference
 is 92.4%.
@@ -638,6 +644,7 @@ at `/usr/local/cuda`, point `CUDA_PATH` at it.
 | Thor-U | `sm_101` | CUDA 12.8 |
 | Jetson AGX Orin | `sm_87` | CUDA 12.6, 13.2 |
 | RTX 4090 | `sm_89` | CUDA 12.8 |
+| A800-SXM4-80GB | `sm_80` | CUDA 12.9 |
 
 
 ## Rust toolchain
