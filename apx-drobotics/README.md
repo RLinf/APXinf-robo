@@ -27,7 +27,6 @@ apxinf-robo：eval-libero、franka_libero、build_robot_policy
 | `src/apx_drobotics/contract.py`、`contracts/` | 契约：固定 SDK、模型、运行时配置和输入输出 |
 | `src/apx_drobotics/testing.py` | 假 SDK 和假 worker，不需要板子就能测试 |
 | `worker/` | C++ worker，在板上编译 |
-| `scripts/deploy.sh` | 板上部署脚本 |
 
 ## 为什么 SDK 外面还要加一层
 

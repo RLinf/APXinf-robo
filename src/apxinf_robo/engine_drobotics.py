@@ -32,7 +32,7 @@ def load_policy(model_dir=None, **kwargs):
     """Load the S600 policy. ``model_dir`` is the SDK's ``oellm_runtime_s600`` directory.
 
     It holds the model and the runtime config, so it is the closest thing this engine
-    has to a checkpoint directory. ``None`` selects the location ``scripts/deploy.sh``
+    has to a checkpoint directory. ``None`` selects the location the tutorial's build step
     uses. ``kwargs`` reach :meth:`apx_drobotics.DroboticsPolicy.from_deployment`.
     """
     return require_apx_drobotics().DroboticsPolicy.from_deployment(model_dir, **kwargs)

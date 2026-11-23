@@ -381,15 +381,15 @@ rather than guess.
 
 Only `franka_libero` with the official W8 `Pi05(libero)` model is supported.
 `apx-drobotics` checks file sizes at start-up but does not re-hash the ~4 GB of model
-files (`deploy.sh` already did); pass `--policy-options '{"verify_hashes": true}'` to
+files (the deployment steps in the tutorial check them once); pass `--policy-options '{"verify_hashes": true}'` to
 audit a deployment that may have been modified. See `apx-drobotics/README.md`.
 ApxInf is not used; the repository runs on the board without the `apxinf/` submodule.
 
-On the board (RDK S600 V5.1.0+, BPU carveout ≥ 5 GB, network access to the SDK download):
+On the board (RDK S600 V5.1.0+, BPU carveout ≥ 5 GB, network access to download the SDK and model):
 
 ```bash
-# 1. Deploy: SDK, model, venv, C++ worker (re-runnable; ~8 GB disk during setup)
-bash apx-drobotics/scripts/deploy.sh
+# 1. Deploy by hand: SDK (fixed build, not yet released), model, venv, C++ worker,
+#    contract check (~8 GB disk during setup). Steps: doc/tutorial-pi0.5-on-drobotics.md
 
 # 2. Serve
 /opt/d-robotics-llm/2.0.0/venv-apx-drobotics/bin/apxinf-robo serve \

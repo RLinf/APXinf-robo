@@ -114,8 +114,8 @@ class DroboticsPolicy:
         :class:`~apx_drobotics.errors.StartupFailure` if the runtime does not come up.
 
         ``verify_hashes`` re-hashes the model and SDK files, about 4 GB, so it is off by
-        default: file presence and byte sizes are always checked, and ``scripts/deploy.sh``
-        has already verified the hashes when it installed them. Turn it on to audit a
+        default: file presence and byte sizes are always checked, and the deployment steps
+        in the tutorial verify the archive hashes when installing. Turn it on to audit a
         deployment that may have been modified since (``--policy-options
         '{"verify_hashes": true}'``). ``metadata["hashes_verified"]`` records which it was.
         """
@@ -158,7 +158,7 @@ class DroboticsPolicy:
         logger.info("checking the deployment under %s", root)
         problems = contract_lib.check_deployment(loaded, root, verify_hashes=verify_hashes)
         if not executable.is_file() or not os.access(executable, os.X_OK):
-            problems.append(f"{executable}: worker executable is missing; run scripts/deploy.sh")
+            problems.append(f"{executable}: worker executable is missing; build it as in doc/tutorial-pi0.5-on-drobotics.md")
         if problems:
             raise DeploymentError(problems)
 
