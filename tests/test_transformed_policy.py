@@ -91,3 +91,31 @@ def test_a_too_narrow_engine_is_rejected_at_construction():
     with pytest.raises(ValueError, match="at least 4 wide"):
         TransformedPolicy(inner, Recorder([]))
     assert inner.closed == 0  # the caller owns the engine until construction succeeds
+
+
+class WithMetadata(Inner):
+    """An engine whose result carries its own ``metadata`` (ApxInf's does; S600's does not)."""
+
+    def infer(self, observation, *, noise=None):
+        result = super().infer(observation, noise=noise)
+        result["metadata"] = {"action_dim": 4, "protocol": "x", "robot": "inner"}
+        return result
+
+
+def test_a_result_metadata_describes_the_wrapped_policy_not_the_engine():
+    inner = WithMetadata([])
+    policy = TransformedPolicy(inner, Recorder([]), action_dim=2, metadata={"robot": "body"})
+    result = policy.infer({})
+    assert result["metadata"] == policy.metadata
+    assert result["metadata"]["action_dim"] == result["actions"].shape[-1] == 2
+    assert result["metadata"]["robot"] == "body"
+    assert result["extra"] == 7  # other engine fields still pass through
+    # A copy: editing the result changes neither this policy nor the engine's own metadata.
+    result["metadata"]["robot"] = "edited"
+    assert policy.metadata["robot"] == "body"
+    assert inner.metadata == {"robot": "inner", "protocol": "x"} and inner.action_dim == 4
+
+
+def test_an_engine_that_returns_no_metadata_still_returns_none():
+    result = TransformedPolicy(Inner([]), Recorder([])).infer({})
+    assert "metadata" not in result
