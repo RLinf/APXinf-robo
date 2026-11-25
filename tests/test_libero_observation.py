@@ -9,12 +9,16 @@ same values.
 """
 
 import numpy as np
+import pickle
+import sys
+from types import ModuleType, SimpleNamespace
 
 from apxinf_robo.envs.libero import (
     libero_gr00t_action,
     libero_gr00t_state,
     libero_images,
     libero_state,
+    load_libero_init_states,
 )
 
 
@@ -133,3 +137,44 @@ def test_a_gripper_that_is_not_two_mirrored_joints_is_rejected():
         assert "2 values" in str(error)
     else:
         raise AssertionError("expected a ValueError for a 1-value gripper")
+
+
+def test_libero_init_states_retry_only_uses_the_selected_bundled_file(monkeypatch, tmp_path):
+    folder = tmp_path / "suite"
+    folder.mkdir()
+    expected = folder / "task.init"
+    expected.write_bytes(b"bundled")
+
+    class Suite:
+        def get_task_init_states(self, task_id):
+            assert task_id == 3
+            raise pickle.UnpicklingError("Weights only load failed")
+
+        def get_task(self, task_id):
+            assert task_id == 3
+            return SimpleNamespace(problem_folder="suite", init_states_file="task.init")
+
+    libero = ModuleType("libero")
+    libero.__path__ = []
+    inner = ModuleType("libero.libero")
+    inner.get_libero_path = lambda key: str(tmp_path) if key == "init_states" else None
+    torch = ModuleType("torch")
+    calls = []
+    torch.load = lambda path, **kwargs: calls.append((path, kwargs)) or ["states"]
+    monkeypatch.setitem(sys.modules, "libero", libero)
+    monkeypatch.setitem(sys.modules, "libero.libero", inner)
+    monkeypatch.setitem(sys.modules, "torch", torch)
+
+    assert load_libero_init_states(Suite(), 3) == ["states"]
+    assert calls == [(expected, {"weights_only": False})]
+
+    class OtherFailure(Suite):
+        def get_task_init_states(self, task_id):
+            raise pickle.UnpicklingError("different failure")
+
+    try:
+        load_libero_init_states(OtherFailure(), 3)
+    except pickle.UnpicklingError as error:
+        assert str(error) == "different failure"
+    else:
+        raise AssertionError("unrelated unpickling errors must propagate")

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import pathlib
+import pickle
 from typing import Tuple
 
 import numpy as np
@@ -25,6 +26,7 @@ __all__ = [
     "libero_state",
     "libero_gr00t_state",
     "libero_gr00t_action",
+    "load_libero_init_states",
     "make_env",
     "to_apxinf_observation",
 ]
@@ -88,6 +90,30 @@ def libero_gr00t_action(actions: np.ndarray) -> np.ndarray:
     converted = np.ascontiguousarray(array.copy())
     converted[..., -1] = -np.sign(2.0 * converted[..., -1] - 1.0)
     return converted
+
+
+def load_libero_init_states(suite, task_id: int):
+    """Load LIBERO's bundled init states across PyTorch's weights-only default.
+
+    Older LIBERO calls ``torch.load`` without ``weights_only=False``. Retry only
+    that compatibility error against the selected task's bundled local file.
+    """
+    try:
+        return suite.get_task_init_states(task_id)
+    except pickle.UnpicklingError as error:
+        if "Weights only load failed" not in str(error):
+            raise
+
+    import torch
+    from libero.libero import get_libero_path
+
+    task = suite.get_task(task_id)
+    path = (
+        pathlib.Path(get_libero_path("init_states"))
+        / task.problem_folder
+        / task.init_states_file
+    )
+    return torch.load(path, weights_only=False)
 
 
 def make_env(task, seed: int):
