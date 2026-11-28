@@ -59,8 +59,6 @@ from typing import Optional, Protocol, Tuple
 
 import numpy as np
 
-from ._engine_options import explicit_flags, refusal
-
 from ..envs.libero import (
     libero_gr00t_action,
     libero_gr00t_state,
@@ -68,6 +66,9 @@ from ..envs.libero import (
     libero_state,
     make_env,
 )
+from ..precision_compare import sha256_array
+from ._engine_options import explicit_flags, refusal
+from .capture_libero import write_observation_npz
 
 # --- rollout protocol constants (OpenPI's public PI0.5 LIBERO configuration) ---
 LIBERO_ACTION_DIM = 7
@@ -82,6 +83,116 @@ LIBERO_PRESET = "franka_libero"
 MAX_STEPS = 520
 WAIT_STEPS = 10
 REPLAN_STEPS = 5
+
+
+class ObservationRecorder:
+    """Opt-in mid-rollout observation dump (``--dump-observations``).
+
+    Frames are written with ``capture_libero.write_observation_npz``, so a mid-rollout
+    sample is consumable by the same calibration and comparison tooling as an
+    initial-state one. ``manifest.jsonl`` records the file hash and where in the
+    episode the frame came from.
+
+    With a noise bank requested, the chunk is driven by ``[horizon, dim]`` float32
+    noise derived from ``(seed, task_id, trial_id, replan)`` and saved under the same
+    sample id, which makes a paired capture reproducible. That noise is not the
+    backend's internal sampling, so such a run is not numerically comparable to one
+    without this flag; the flag is an explicit choice for that reason.
+    """
+
+    def __init__(
+        self,
+        directory,
+        *,
+        skip: int = 2,
+        every: int = 1,
+        max_per_episode: int = 5,
+        max_total: int = 50,
+        noise_bank=None,
+        noise_shape: tuple[int, int] | None = None,
+        seed: int = 0,
+    ) -> None:
+        self.directory = pathlib.Path(directory)
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self.manifest = self.directory / "manifest.jsonl"
+        self.skip = max(0, skip)
+        self.every = max(1, every)
+        self.max_per_episode = max_per_episode
+        self.max_total = max_total
+        self.noise_bank_path = pathlib.Path(noise_bank) if noise_bank is not None else None
+        self.noise_shape = noise_shape
+        self.seed = seed
+        self.total = (
+            sum(1 for line in self.manifest.read_text().splitlines() if line.strip())
+            if self.manifest.exists()
+            else 0
+        )
+        self._episode = None
+        self._in_episode = 0
+        self._noise: dict[str, np.ndarray] = {}
+
+    def record(self, *, images, state, prompt, suite, task_id, trial_id, replan, action_step):
+        """Write one frame when the stride and caps allow it; return its noise or None."""
+        key = (suite, task_id, trial_id)
+        if key != self._episode:
+            self._episode, self._in_episode = key, 0
+        if isinstance(state, dict):  # named-state families have no single vector
+            return None
+        if replan < self.skip or (replan - self.skip) % self.every:
+            return None
+        if self._in_episode >= self.max_per_episode or self.total >= self.max_total:
+            return None
+        sample_id = f"mid-{suite}-task{task_id}-trial{trial_id}-replan{replan:04d}"
+        path = write_observation_npz(
+            self.directory,
+            sample_id,
+            {
+                "observation/image": images[0],
+                "observation/wrist_image": images[1],
+                "observation/state": state,
+                "prompt": prompt,
+            },
+        )
+        noise = None
+        if self.noise_bank_path is not None and self.noise_shape is not None:
+            noise = np.random.default_rng([self.seed, task_id, trial_id, replan]).standard_normal(
+                self.noise_shape
+            ).astype(np.float32)
+            self._noise[sample_id] = noise
+        entry = {
+            "sample_id": sample_id,
+            "suite": suite,
+            "task_id": task_id,
+            "trial_id": trial_id,
+            "replan": replan,
+            "action_step": action_step,
+            "path": path.name,
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            # Same canonical hash as the comparator, so a manifest entry and a
+            # comparison report can be cross-checked without a translation step.
+            "noise_sha256": None if noise is None else sha256_array(noise),
+        }
+        with self.manifest.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(entry, sort_keys=True) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        self.total += 1
+        self._in_episode += 1
+        return noise
+
+    def close(self) -> None:
+        if self.noise_bank_path is None or not self._noise:
+            return
+        # A resumed run must not drop the noise this bank already holds.
+        bank = dict(self._noise)
+        if self.noise_bank_path.exists():
+            with np.load(self.noise_bank_path, allow_pickle=False) as existing:
+                for key in existing.files:
+                    bank.setdefault(key, np.array(existing[key]))
+        self.noise_bank_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.noise_bank_path.with_name(self.noise_bank_path.name + ".tmp.npz")
+        np.savez_compressed(temporary, **bank)
+        os.replace(temporary, self.noise_bank_path)
 
 
 def _two_finger_state(observation):
@@ -518,8 +629,9 @@ class InProcessBackend:
 
         # Lazy: loading the engine pulls in the policy stack; websocket-only
         # users never pay for it.
-        from ..engine import load_policy
         from apxinf.policies.auto import _read_model_type
+
+        from ..engine import load_policy
 
         self.model_type = args.model_type or _read_model_type(args.model_dir)
         if self.model_type == "qwen_drive":
@@ -605,6 +717,7 @@ def run_episode(
     settle_gripper: float = -1.0,
     max_steps: int | None = None,
     trace_path: pathlib.Path | None = None,
+    recorder: ObservationRecorder | None = None,
 ) -> dict:
     model_type = getattr(backend, "model_type", "pi05")
     episode_started = time.perf_counter()
@@ -685,6 +798,20 @@ def run_episode(
                 warm_start_replans += 1
                 if warm_noise_checksum is None:
                     warm_noise_checksum = float(np.abs(noise).sum())
+
+            if recorder is not None:
+                dumped_noise = recorder.record(
+                    images=images,
+                    state=state,
+                    prompt=prompt,
+                    suite=suite,
+                    task_id=task_id,
+                    trial_id=trial_id,
+                    replan=replans,
+                    action_step=action_steps,
+                )
+                if dumped_noise is not None:
+                    noise = dumped_noise
 
             request_started = time.perf_counter()
             actions, normalized_actions, timing = backend.infer(
@@ -833,6 +960,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="seventh action used during the initial settle steps (default: -1)",
     )
     parser.add_argument("--max-attempts", type=int, default=3)
+    parser.add_argument(
+        "--dump-observations", type=pathlib.Path, default=None,
+        help="also save mid-rollout frames (default: off); they use the same NPZ field "
+             "names as capture-libero, so one reader serves both",
+    )
+    parser.add_argument("--dump-skip", type=int, default=2, help="replans skipped per episode")
+    parser.add_argument("--dump-every", type=int, default=1, help="save every Nth replan after the skip")
+    parser.add_argument("--dump-max-per-episode", type=int, default=5)
+    parser.add_argument("--dump-max-total", type=int, default=50)
+    parser.add_argument(
+        "--dump-noise-bank", type=pathlib.Path, default=None,
+        help="drive dumped chunks with [horizon, dim] noise derived from "
+             "(seed, task, trial, replan) and save it; such a run is not numerically "
+             "comparable to one without this flag",
+    )
     parser.add_argument("--results-jsonl", required=True, type=pathlib.Path)
     parser.add_argument("--summary-json", required=True, type=pathlib.Path)
     parser.add_argument(
@@ -1019,6 +1161,14 @@ def resolve_task_ids(spec: str, n_tasks: int, suite: str) -> list[int]:
 
 def main(argv=None) -> None:
     args = parse_args(argv)
+    if args.dump_noise_bank is not None:
+        if args.dump_observations is None:
+            raise ValueError("--dump-noise-bank requires --dump-observations")
+        if args.warm_start:
+            raise ValueError(
+                "--dump-noise-bank cannot be combined with --warm-start: both own the "
+                "chunk noise, and the recorder would silently replace the warm-start one"
+            )
     transport = "openpi_websocket" if args.backend == "websocket" else "in_process_api"
 
     from libero.libero import benchmark
@@ -1041,9 +1191,34 @@ def main(argv=None) -> None:
     }
     # The backend comes first: the run identity includes what the engine publishes.
     backend = build_backend(args)
+    recorder: ObservationRecorder | None = None
     try:
         if args.warm_start and backend.model_type != "pi05":
             raise ValueError("--warm-start is currently defined for PI0.5 flow policies only")
+        if args.dump_observations is not None:
+            noise_shape = None
+            if args.dump_noise_bank is not None:
+                horizon = backend.metadata.get("action_horizon")
+                dim = backend.metadata.get("action_dim")
+                if horizon and dim:
+                    noise_shape = (int(horizon), int(dim))
+                else:
+                    print(
+                        "--dump-noise-bank ignored: the backend publishes no "
+                        "action_horizon/action_dim",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+            recorder = ObservationRecorder(
+                args.dump_observations,
+                skip=args.dump_skip,
+                every=args.dump_every,
+                max_per_episode=args.dump_max_per_episode,
+                max_total=args.dump_max_total,
+                noise_bank=args.dump_noise_bank,
+                noise_shape=noise_shape,
+                seed=args.seed,
+            )
         identity = run_identity(args, backend.metadata)
         ledger = completed_runs(args.results_jsonl, args.precision, identity)
         unexpected = set(ledger) - expected_keys
@@ -1091,6 +1266,7 @@ def main(argv=None) -> None:
                                     args.max_steps,
                                     (args.trace_dir / name / f"task-{task_id}-trial-{trial_id}-attempt-{attempt}.json"
                                      if args.trace_dir is not None else None),
+                                    recorder=recorder,
                                 )
                                 record["attempt"] = attempt
                                 record["precision"] = args.precision
@@ -1135,6 +1311,8 @@ def main(argv=None) -> None:
                 finally:
                     env.close()
     finally:
+        if recorder is not None:
+            recorder.close()
         backend.close()
 
     write_summary(

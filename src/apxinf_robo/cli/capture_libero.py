@@ -16,6 +16,7 @@ machine, copy the NPZ directory and update --input-dir in that command.
 from __future__ import annotations
 
 import argparse
+import os
 import pathlib
 import sys
 from typing import Callable, Mapping, Optional, Sequence
@@ -192,6 +193,24 @@ def capture_observations(
     return tuple(observations)
 
 
+def write_observation_npz(
+    output_dir: pathlib.Path, sample_id: str, observation: Mapping[str, object]
+) -> pathlib.Path:
+    """Write one observation NPZ atomically under ``sample_id``.
+
+    Shared with ``eval-libero --dump-observations`` so initial-state capture and
+    mid-rollout capture produce the same field names for the same robot preset.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / f"{sample_id}.npz"
+    temporary = path.with_name(path.name + ".tmp.npz")
+    # A str prompt becomes a 0-d unicode array, which is what the engine's
+    # loader unwraps back into a str via ``ndarray.item()``.
+    np.savez(temporary, **{name: np.asarray(value) for name, value in observation.items()})
+    os.replace(temporary, path)
+    return path
+
+
 def write_npz_observations(
     observations: Sequence[Mapping[str, object]],
     output_dir: pathlib.Path,
@@ -218,11 +237,9 @@ def write_npz_observations(
     width = max(3, len(str(len(observations) - 1)))
     written = []
     for index, observation in enumerate(observations):
-        path = output_dir / f"{prefix}-{index:0{width}d}.npz"
-        # A str prompt becomes a 0-d unicode array, which is what the engine's
-        # loader unwraps back into a str via ``ndarray.item()``.
-        np.savez(path, **{name: np.asarray(value) for name, value in observation.items()})
-        written.append(path)
+        written.append(
+            write_observation_npz(output_dir, f"{prefix}-{index:0{width}d}", observation)
+        )
     return written
 
 
